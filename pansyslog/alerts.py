@@ -2,35 +2,54 @@
 
 
 def get_commit_context(config_log):
-    """Extract the most recent commit's admin/client/ip from config log."""
+    """Extract recent commit metadata from config log.
+
+    Returns all unique committers since we can't reliably map individual
+    rule changes to specific commits. The alert will list all admins who
+    committed recently so the recipient can investigate.
+    """
+    commits = []
+    seen = set()
     for entry in config_log:
-        if entry["cmd"] == "commit":
-            return {
+        if entry["cmd"] == "commit" and entry["admin"] not in seen:
+            seen.add(entry["admin"])
+            commits.append({
                 "changed_by": entry["admin"],
                 "client": entry["client"],
                 "source_ip": entry["source_ip"],
                 "commit_time": entry["time"],
                 "device_name": entry["device_name"],
                 "serial": entry["serial"],
-            }
-    if config_log:
+            })
+
+    if not commits and config_log:
         e = config_log[0]
-        return {
+        commits.append({
             "changed_by": e["admin"],
             "client": e["client"],
             "source_ip": e["source_ip"],
             "commit_time": e["time"],
             "device_name": e["device_name"],
             "serial": e["serial"],
-        }
-    return {
-        "changed_by": "unknown",
-        "client": "unknown",
-        "source_ip": "unknown",
-        "commit_time": "unknown",
-        "device_name": "unknown",
-        "serial": "unknown",
-    }
+        })
+
+    if not commits:
+        commits.append({
+            "changed_by": "unknown",
+            "client": "unknown",
+            "source_ip": "unknown",
+            "commit_time": "unknown",
+            "device_name": "unknown",
+            "serial": "unknown",
+        })
+
+    # Build a merged context — primary is most recent, but list all committers
+    ctx = dict(commits[0])
+    if len(commits) > 1:
+        all_admins = [c["changed_by"] for c in commits]
+        ctx["changed_by"] = ", ".join(all_admins)
+        ctx["recent_commits"] = commits
+    return ctx
 
 
 def _zones_match_prefix(zones, prefix):
