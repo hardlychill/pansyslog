@@ -54,7 +54,7 @@ panorama:
   #   - DG-branch-offices
 
 alert_zones:
-  - [untrust-WAN, trust-GOOD]
+  - [untrust-, trust-]    # prefix match: untrust-* <-> trust-*
 
 email:
   enabled: true
@@ -65,7 +65,7 @@ Env var overrides: `PAN_HOST`, `PAN_USER`, `PAN_PASS`, `SMTP_USER`, `SMTP_PASS`,
 
 ## Alert Types
 
-**BREAK_OF_SEGMENTATION** — allow rule between configured zone pairs (e.g., untrust-WAN <-> trust-GOOD)
+**BREAK_OF_SEGMENTATION** — allow rule between zones matching configured prefix pairs (e.g., any `untrust-*` zone to/from any `trust-*` zone)
 
 **REMOTE_ACCESS_RULE** — rule allowing remote-access traffic via:
 - App matching PAN-OS `remote-access` subcategory (~197 apps)

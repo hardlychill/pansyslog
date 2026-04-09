@@ -33,16 +33,31 @@ def get_commit_context(config_log):
     }
 
 
-def rule_involves_alert_zones(rule, alert_zone_pairs):
-    """Check if a rule involves an alertable zone pair."""
+def _zones_match_prefix(zones, prefix):
+    """Check if any zone in the set starts with the given prefix."""
+    return any(z.startswith(prefix) for z in zones)
+
+
+def rule_involves_alert_zones(rule, alert_zone_prefixes):
+    """Check if a rule allows traffic between alert zone prefix pairs.
+
+    alert_zone_prefixes is a list of (prefix_a, prefix_b) tuples.
+    Alerts if any from-zone matches one prefix and any to-zone matches the other
+    (in either direction). Zone 'any' matches all prefixes.
+    """
     from_zones = set(rule["from"])
     to_zones = set(rule["to"])
+    has_any_from = "any" in from_zones
+    has_any_to = "any" in to_zones
 
-    if "any" in from_zones or "any" in to_zones:
-        return True
+    for prefix_a, prefix_b in alert_zone_prefixes:
+        a_in_from = has_any_from or _zones_match_prefix(from_zones, prefix_a)
+        b_in_to = has_any_to or _zones_match_prefix(to_zones, prefix_b)
+        b_in_from = has_any_from or _zones_match_prefix(from_zones, prefix_b)
+        a_in_to = has_any_to or _zones_match_prefix(to_zones, prefix_a)
 
-    for pair in alert_zone_pairs:
-        if (from_zones & pair) and (to_zones & pair):
+        # Either direction: A->B or B->A
+        if (a_in_from and b_in_to) or (b_in_from and a_in_to):
             return True
 
     return False
@@ -79,7 +94,7 @@ def should_alert(rule, cfg, ra_apps=None, service_objects=None):
     if rule.get("action") in ("deny", "drop", "reset-client", "reset-server", "reset-both"):
         return False, None
 
-    if rule_involves_alert_zones(rule, cfg["alert_zone_pairs"]):
+    if rule_involves_alert_zones(rule, cfg["alert_zone_prefixes"]):
         return True, "insecure-zone"
 
     if ra_apps is not None and service_objects is not None:

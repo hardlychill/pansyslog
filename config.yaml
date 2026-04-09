@@ -14,9 +14,13 @@ panorama:
   #   - DG-branch-offices
   #   - DG-dmz
 
-# Zone pairs that trigger BREAK_OF_SEGMENTATION alerts
+# Zone prefix pairs that trigger BREAK_OF_SEGMENTATION alerts.
+# Alerts fire when an allow rule has any zone matching one prefix
+# on one side and any zone matching the other prefix on the other side.
+# e.g. ["untrust-", "trust-"] catches untrust-WAN -> trust-LAN,
+#       trust-SERVERS -> untrust-INET, etc.
 alert_zones:
-  - [untrust-WAN, trust-GOOD]
+  - [untrust-, trust-]
 
 # Ports that trigger REMOTE_ACCESS_RULE alerts when used with app=any
 remote_access_ports:

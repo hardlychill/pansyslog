@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
         "password": "",
         "device_groups": "all",
     },
-    "alert_zones": [["untrust-WAN", "trust-GOOD"]],
+    "alert_zones": [["untrust-", "trust-"]],
     "remote_access_ports": [
         "22", "23", "3389", "5900", "5901", "5902", "5800",
         "4899", "5938", "3283", "5631", "5632", "1494", "2598",
@@ -97,8 +97,8 @@ def load_config(path=None):
     if cfg["email"]["smtp_user"] and cfg["email"]["smtp_pass"] and cfg["email"]["to"]:
         cfg["email"]["enabled"] = True
 
-    # Normalize alert_zones to frozensets
-    cfg["alert_zone_pairs"] = {frozenset(pair) for pair in cfg["alert_zones"]}
+    # Normalize alert_zones to prefix tuples
+    cfg["alert_zone_prefixes"] = [tuple(pair) for pair in cfg["alert_zones"]]
     cfg["remote_access_port_set"] = set(cfg["remote_access_ports"])
 
     # Ensure data_dir exists
