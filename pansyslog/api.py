@@ -39,7 +39,14 @@ class PanoramaClient:
     def _get(self, params, timeout=15):
         url = f"https://{self.host}/api/"
         resp = requests.get(url, params=params, verify=False, timeout=timeout)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError:
+            # Redact credentials from error messages
+            msg = f"{resp.status_code} API error from {self.host}"
+            if "Not authorized" in resp.text or resp.status_code == 403:
+                msg += " (authentication failed — check user/password and XML API permissions)"
+            raise RuntimeError(msg)
         return resp
 
     # --- Device group enumeration ---
