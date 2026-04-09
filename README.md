@@ -105,6 +105,11 @@ pansyslog/
     └── server.py              # Webhook server with debounce
 ```
 
+## Documentation
+
+- **[Panorama Syslog Setup](docs/panorama-syslog-setup.md)** — Step-by-step guide for the firewall admin to configure Panorama to send the right syslog events, create an API user, and verify connectivity.
+- **[Deployment Guide](docs/deployment.md)** — How to build, deploy, configure, operate, and troubleshoot pansyslog in production. Includes notes on Panorama API considerations and areas where the deploying agent may need to adapt code to the environment.
+
 ## Data Directory
 
 Defaults to `/data` (Docker) or `./data` (local via `DATA_DIR` env var):
