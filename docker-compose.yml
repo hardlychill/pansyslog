@@ -12,6 +12,11 @@ services:
       - PAN_PASS=${PAN_PASS}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   vector:
     image: timberio/vector:0.44.0-debian
@@ -23,6 +28,11 @@ services:
     volumes:
       - ./configs/vector-docker.yaml:/etc/vector/vector.yaml:ro
       - pansyslog-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   pansyslog-data:

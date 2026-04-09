@@ -67,6 +67,20 @@ class WebhookServer:
         else:
             print("[OK] No new alerts from this change.")
 
+        self._rotate_alert_log()
+
+    def _rotate_alert_log(self, max_entries=1000):
+        """Trim alert log to the most recent max_entries lines."""
+        if not self.alert_log.exists():
+            return
+        with open(self.alert_log) as f:
+            lines = f.readlines()
+        if len(lines) <= max_entries:
+            return
+        with open(self.alert_log, "w") as f:
+            f.writelines(lines[-max_entries:])
+        print(f"[ROTATE] Trimmed alerts.json from {len(lines)} to {max_entries} entries")
+
     def _send_alert_email(self, alert_count_before, new_count):
         """Read new alert entries and send summary email."""
         if not self.alert_log.exists():

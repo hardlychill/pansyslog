@@ -21,12 +21,8 @@ transforms:
       contains(msg, "config") || contains(msg, "commit") || contains(msg, "rule") || contains(msg, "security") || contains(msg, "policy")
 
 sinks:
-  all_logs:
-    type: "file"
-    inputs: ["tag_events"]
-    path: "/data/logs/all_syslog.log"
-    encoding:
-      codec: "json"
+  # Raw syslog available via 'docker logs pansyslog-vector' (console sink below).
+  # No file sink — avoids unbounded disk growth. Enable temporarily for debugging.
 
   config_change_webhook:
     type: "http"
@@ -37,6 +33,12 @@ sinks:
       codec: "json"
     acknowledgements:
       enabled: false
+
+  console_debug:
+    type: "console"
+    inputs: ["filter_config_changes"]
+    encoding:
+      codec: "json"
 
 api:
   enabled: true
