@@ -45,7 +45,9 @@ class PanoramaClient:
     # --- Device group enumeration ---
 
     def list_device_groups(self):
-        """Enumerate all device groups configured in Panorama."""
+        """Enumerate all device groups configured in Panorama.
+        Filters out templates and template-stacks — only returns entries
+        that live under /device-group and have a devices or rulebase node."""
         resp = self._get({
             "type": "config",
             "action": "get",
@@ -57,7 +59,14 @@ class PanoramaClient:
         dgs = []
         for entry in root.findall(".//device-group/entry"):
             name = entry.get("name", "")
-            if name:
+            if not name:
+                continue
+            # Real device groups have <devices> (managed firewalls) or a rulebase.
+            # Templates don't. Skip entries that have neither.
+            has_devices = entry.find("devices") is not None
+            has_pre = entry.find("pre-rulebase") is not None
+            has_post = entry.find("post-rulebase") is not None
+            if has_devices or has_pre or has_post:
                 dgs.append(name)
         return sorted(dgs)
 
