@@ -51,10 +51,37 @@ class PanoramaClient:
 
     # --- Device group enumeration ---
 
+    def _list_template_names(self):
+        """Fetch all template and template-stack names to exclude from DG list."""
+        names = set()
+        for xpath in (
+            "/config/devices/entry[@name='localhost.localdomain']/template",
+            "/config/devices/entry[@name='localhost.localdomain']/template-stack",
+        ):
+            try:
+                resp = self._get({
+                    "type": "config",
+                    "action": "get",
+                    "key": self.api_key,
+                    "xpath": xpath,
+                })
+                root = ET.fromstring(resp.text)
+                for entry in root.findall(".//entry"):
+                    name = entry.get("name", "")
+                    if name:
+                        names.add(name)
+            except Exception:
+                pass
+        return names
+
     def list_device_groups(self):
         """Enumerate all device groups configured in Panorama.
-        Filters out templates and template-stacks — only returns entries
-        that live under /device-group and have a devices or rulebase node."""
+        Excludes templates and template-stacks by cross-referencing."""
+        # Get template names to exclude
+        template_names = self._list_template_names()
+        if template_names:
+            print(f"[pansyslog] Found {len(template_names)} templates/stacks to exclude")
+
         resp = self._get({
             "type": "config",
             "action": "get",
@@ -68,13 +95,9 @@ class PanoramaClient:
             name = entry.get("name", "")
             if not name:
                 continue
-            # Real device groups have <devices> (managed firewalls) or a rulebase.
-            # Templates don't. Skip entries that have neither.
-            has_devices = entry.find("devices") is not None
-            has_pre = entry.find("pre-rulebase") is not None
-            has_post = entry.find("post-rulebase") is not None
-            if has_devices or has_pre or has_post:
-                dgs.append(name)
+            if name in template_names:
+                continue
+            dgs.append(name)
         return sorted(dgs)
 
     def resolve_device_groups(self, configured):
