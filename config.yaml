@@ -1,0 +1,54 @@
+# pansyslog configuration
+# Env vars override these values (see pansyslog/config.py for full list)
+
+panorama:
+  host: 10.0.0.1
+  user: admin
+  password: changeme  # override via PAN_PASS env var
+
+  # Device groups to monitor. Use "all" to auto-enumerate.
+  device_groups: all
+  # Or list specific ones:
+  # device_groups:
+  #   - DG-datacenter
+  #   - DG-branch-offices
+  #   - DG-dmz
+
+# Zone pairs that trigger BREAK_OF_SEGMENTATION alerts
+alert_zones:
+  - [untrust-WAN, trust-GOOD]
+
+# Ports that trigger REMOTE_ACCESS_RULE alerts when used with app=any
+remote_access_ports:
+  - "22"    # SSH
+  - "23"    # Telnet
+  - "3389"  # RDP
+  - "5900"  # VNC
+  - "5901"  # VNC
+  - "5902"  # VNC
+  - "5800"  # VNC HTTP
+  - "4899"  # Radmin
+  - "5938"  # TeamViewer
+  - "3283"  # Apple Remote Desktop
+  - "5631"  # pcAnywhere
+  - "5632"  # pcAnywhere
+  - "1494"  # Citrix ICA
+  - "2598"  # Citrix CGP
+  - "8200"  # GoToMyPC
+  - "6568"  # AnyDesk
+  - "4172"  # PCoIP
+
+debounce_seconds: 30
+webhook_port: 8787
+
+email:
+  enabled: true
+  to: alerts@example.com
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  # Set via env vars SMTP_USER and SMTP_PASS (don't commit credentials)
+  smtp_user: ""
+  smtp_pass: ""
+
+# Where baselines, logs, and caches are stored
+data_dir: /data

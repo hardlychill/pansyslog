@@ -1,0 +1,43 @@
+data_dir: "/data/vector"
+
+sources:
+  pan_syslog:
+    type: "syslog"
+    address: "0.0.0.0:5514"
+    mode: "udp"
+
+transforms:
+  tag_events:
+    type: "remap"
+    inputs: ["pan_syslog"]
+    source: |
+      .received_at = now()
+
+  filter_config_changes:
+    type: "filter"
+    inputs: ["tag_events"]
+    condition: |
+      msg = downcase(string!(.message))
+      contains(msg, "config") || contains(msg, "commit") || contains(msg, "rule") || contains(msg, "security") || contains(msg, "policy")
+
+sinks:
+  all_logs:
+    type: "file"
+    inputs: ["tag_events"]
+    path: "/data/logs/all_syslog.log"
+    encoding:
+      codec: "json"
+
+  config_change_webhook:
+    type: "http"
+    inputs: ["filter_config_changes"]
+    uri: "http://pansyslog:8787"
+    method: "post"
+    encoding:
+      codec: "json"
+    acknowledgements:
+      enabled: false
+
+api:
+  enabled: true
+  address: "0.0.0.0:8686"

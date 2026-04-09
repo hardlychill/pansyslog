@@ -1,0 +1,28 @@
+services:
+  pansyslog:
+    build: .
+    container_name: pansyslog
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - pansyslog-data:/data
+      - ./config.yaml:/etc/pansyslog/config.yaml:ro
+    environment:
+      - PAN_PASS=${PAN_PASS}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+
+  vector:
+    image: timberio/vector:0.44.0-debian
+    container_name: pansyslog-vector
+    restart: unless-stopped
+    ports:
+      - "5514:5514/udp"
+      - "8686:8686"
+    volumes:
+      - ./configs/vector-docker.yaml:/etc/vector/vector.yaml:ro
+      - pansyslog-data:/data
+
+volumes:
+  pansyslog-data:
