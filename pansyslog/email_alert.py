@@ -15,16 +15,18 @@ def send_email(cfg, subject, body):
         print(f"  Body: {body}")
         return False
 
+    sender = email_cfg.get("smtp_user") or email_cfg.get("from", f"pansyslog@{email_cfg['smtp_host']}")
     msg = MIMEText(body, "plain")
     msg["Subject"] = subject
-    msg["From"] = email_cfg["smtp_user"]
+    msg["From"] = sender
     msg["To"] = email_cfg["to"]
 
     try:
         with smtplib.SMTP(email_cfg["smtp_host"], email_cfg["smtp_port"]) as server:
-            server.starttls()
-            server.login(email_cfg["smtp_user"], email_cfg["smtp_pass"])
-            server.sendmail(email_cfg["smtp_user"], [email_cfg["to"]], msg.as_string())
+            if email_cfg.get("smtp_user") and email_cfg.get("smtp_pass"):
+                server.starttls()
+                server.login(email_cfg["smtp_user"], email_cfg["smtp_pass"])
+            server.sendmail(sender, [email_cfg["to"]], msg.as_string())
         print(f"[EMAIL SENT] {subject}")
         return True
     except Exception as e:
