@@ -116,7 +116,7 @@ def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
     return alerts
 
 
-def run_check(cfg):
+def run_check(cfg, client=None):
     """Run a full check cycle across all device groups. Returns total new alerts."""
     pan_cfg = cfg["panorama"]
     data_dir = Path(cfg["data_dir"])
@@ -124,10 +124,11 @@ def run_check(cfg):
 
     print(f"\n[{datetime.now().isoformat()}] Checking Panorama ({pan_cfg['host']})...")
 
-    client = PanoramaClient(
-        pan_cfg["host"], pan_cfg["user"], pan_cfg["password"],
-        data_dir=cfg["data_dir"],
-    )
+    if client is None:
+        client = PanoramaClient(
+            pan_cfg["host"], pan_cfg["user"], pan_cfg["password"],
+            data_dir=cfg["data_dir"],
+        )
 
     # Resolve device groups
     try:

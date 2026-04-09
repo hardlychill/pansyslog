@@ -7,6 +7,7 @@ from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+from .api import PanoramaClient
 from .check import run_check
 from .email_alert import send_email
 
@@ -22,6 +23,13 @@ class WebhookServer:
         self._last_check = 0
         self._pending = False
         self._lock = threading.Lock()
+
+        # Single persistent API client — one keygen for the process lifetime
+        pan_cfg = cfg["panorama"]
+        self.client = PanoramaClient(
+            pan_cfg["host"], pan_cfg["user"], pan_cfg["password"],
+            data_dir=cfg["data_dir"],
+        )
 
     def _deferred_check(self, delay):
         """Wait for debounce window to expire, then run if still pending."""
@@ -60,7 +68,7 @@ class WebhookServer:
             with open(self.alert_log) as f:
                 alert_count_before = sum(1 for _ in f)
 
-        total_new = run_check(self.cfg)
+        total_new = run_check(self.cfg, client=self.client)
 
         if total_new > 0:
             self._send_alert_email(alert_count_before, total_new)
