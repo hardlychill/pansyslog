@@ -49,7 +49,7 @@ email:
 
 debounce_seconds: 30
 max_workers: 10             # Parallel device group checks
-renotify_hours: 24          # Re-email unacknowledged alerts (0 to disable)
+renotify_hours: 0           # Re-email unacknowledged alerts every N hours (0 = disabled)
 ```
 
 **Internal mail relay:** If your SMTP relay doesn't require authentication, leave `smtp_user` and `smtp_pass` empty. pansyslog skips TLS/login when no credentials are set.
@@ -94,7 +94,6 @@ Expected output:
 [pansyslog] Panorama: 10.0.0.1
 [pansyslog] Device groups: all (auto-enumerate)
 [pansyslog] Endpoints: POST / (webhook), POST /check (manual), POST /acknowledge, GET /health, GET /active-alerts
-[pansyslog] Re-notification enabled: every 24h for unacknowledged alerts
 [pansyslog] Alerts will be sent to security-alerts@yourorg.com
 ```
 
@@ -152,7 +151,7 @@ curl -X POST http://localhost:8787/acknowledge \
 curl -X POST http://localhost:8787/acknowledge -d '{"all":true}'
 ```
 
-Unacknowledged alerts trigger a reminder email every `renotify_hours` (default 24h). Acknowledging stops the reminders. Alerts auto-resolve if the offending rule is removed from the rulebase.
+**Note:** Alert tracking and re-notification is disabled by default (`renotify_hours: 0`). When disabled, `/acknowledge` and `/active-alerts` return `{"status": "disabled"}`. Set `renotify_hours: 24` in config.yaml and restart to enable. When enabled, unacknowledged alerts trigger reminder emails at the configured interval, and acknowledging stops the reminders. Alerts auto-resolve if the offending rule is removed from the rulebase.
 
 ## Operations
 

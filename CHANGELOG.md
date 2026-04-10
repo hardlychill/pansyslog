@@ -24,13 +24,13 @@ Changes made after initial production deployment and testing against live Panora
 
 - **Failure suppression** — Device groups that fail 3 consecutive times have their warnings suppressed to reduce log noise. Recovery is logged when they start responding again. Suppressed DGs are listed on the `/health` endpoint.
 
-- **Unacknowledged alert tracking** — New alerts are tracked as "active" until explicitly acknowledged. Unacknowledged alerts trigger a reminder email every 24 hours (configurable via `renotify_hours`). Alerts auto-resolve when the offending rule is removed.
+- **Unacknowledged alert tracking (disabled by default)** — When enabled (`renotify_hours > 0`), new alerts are tracked as "active" until explicitly acknowledged. Unacknowledged alerts trigger a reminder email at the configured interval. Alerts auto-resolve when the offending rule is removed. Disabled by default to avoid noise until an acknowledgment workflow is in place. All related endpoints return `{"status": "disabled"}` when off.
 
 - **Management API endpoints:**
-  - `GET /health` — Status, uptime, API key state, check stats, failing/suppressed DGs, unacknowledged alert count
-  - `GET /active-alerts` — List all unacknowledged alerts with first-seen time and notification count
+  - `GET /health` — Status, uptime, API key state, check stats, failing/suppressed DGs, unacknowledged alert count (or "disabled")
+  - `GET /active-alerts` — List all unacknowledged alerts with first-seen time and notification count (returns "disabled" when `renotify_hours: 0`)
   - `POST /check` — Manual check trigger that bypasses debounce (for testing and post-deploy verification)
-  - `POST /acknowledge` — Acknowledge specific alerts or all alerts to stop re-notifications
+  - `POST /acknowledge` — Acknowledge specific alerts or all alerts to stop re-notifications (returns "disabled" when `renotify_hours: 0`)
 
 - **Config log depth increased** — Pulls 50 recent config log entries (up from 10) to better capture all committers in busy environments.
 
@@ -42,7 +42,8 @@ New fields in `config.yaml` (all optional with defaults):
 
 ```yaml
 max_workers: 10    # parallel device group checks (default: 10)
-renotify_hours: 24 # re-email unacknowledged alerts every N hours (default: 24, 0 to disable)
+renotify_hours: 0  # re-email unacknowledged alerts every N hours (default: 0 = disabled)
+                   # set to 24 to enable daily re-notification reminders
 ```
 
 ### Upgrade Instructions
