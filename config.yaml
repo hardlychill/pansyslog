@@ -45,7 +45,7 @@ remote_access_ports:
 debounce_seconds: 30
 webhook_port: 8787
 max_workers: 10    # parallel device group checks
-renotify_hours: 24 # re-email unacknowledged alerts every N hours (0 to disable)
+renotify_hours: 0  # re-email unacknowledged alerts every N hours (0 to disable)
 
 email:
   enabled: true

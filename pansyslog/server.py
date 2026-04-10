@@ -38,13 +38,13 @@ class WebhookServer:
             data_dir=cfg["data_dir"],
         )
 
-        # Unacknowledged alert tracker
-        renotify_hours = cfg.get("renotify_hours", 24)
-        self.tracker = AlertTracker(cfg["data_dir"], renotify_hours=renotify_hours)
-
-        # Start re-notification background thread
+        # Unacknowledged alert tracker (disabled when renotify_hours=0)
+        renotify_hours = cfg.get("renotify_hours", 0)
         if renotify_hours > 0:
+            self.tracker = AlertTracker(cfg["data_dir"], renotify_hours=renotify_hours)
             self._start_renotify_loop(renotify_hours)
+        else:
+            self.tracker = None
 
     def _start_renotify_loop(self, interval_hours):
         """Background thread that checks for due re-notifications."""
@@ -209,8 +209,8 @@ class WebhookServer:
             "dg_suppressed": suppressed,
             "debounce_seconds": self.debounce_seconds,
             "email_enabled": self.cfg["email"]["enabled"],
-            "unacknowledged_alerts": len(self.tracker.list_active()),
-            "renotify_hours": self.cfg.get("renotify_hours", 24),
+            "unacknowledged_alerts": len(self.tracker.list_active()) if self.tracker else "disabled",
+            "renotify_hours": self.cfg.get("renotify_hours", 0),
         }
 
     def serve(self):
@@ -237,6 +237,10 @@ class WebhookServer:
                     threading.Thread(target=server_ref._do_check, daemon=True).start()
 
                 elif path == "/acknowledge":
+                    if not server_ref.tracker:
+                        self._json_response(200, {"status": "disabled", "message": "set renotify_hours > 0 to enable"})
+                        return
+
                     try:
                         body = json.loads(raw.decode()) if raw else {}
                     except json.JSONDecodeError:
@@ -274,7 +278,10 @@ class WebhookServer:
                     self._json_response(200, server_ref._get_health())
 
                 elif path == "/active-alerts":
-                    self._json_response(200, server_ref.tracker.list_active())
+                    if server_ref.tracker:
+                        self._json_response(200, server_ref.tracker.list_active())
+                    else:
+                        self._json_response(200, {"status": "disabled", "message": "set renotify_hours > 0 to enable"})
 
                 else:
                     self.send_response(404)
