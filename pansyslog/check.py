@@ -2,6 +2,8 @@
 
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +15,11 @@ from .alerts import (
     format_modified_diff,
 )
 from .diff import parse_rules, diff_rules, load_baseline, save_baseline
+
+# Track DGs that consistently fail so we don't spam logs
+_dg_failures = {}  # {dg_name: consecutive_failure_count}
+_SUPPRESS_AFTER = 3  # suppress warnings after this many consecutive failures
+_alert_log_lock = threading.Lock()
 
 
 def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group):
@@ -41,15 +48,38 @@ def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group):
     print(f"Details: {details}")
     print(f"{'='*60}\n")
 
-    alert_log.parent.mkdir(parents=True, exist_ok=True)
-    with open(alert_log, "a") as f:
-        f.write(json.dumps(alert) + "\n")
+    with _alert_log_lock:
+        alert_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(alert_log, "a") as f:
+            f.write(json.dumps(alert) + "\n")
 
 
 def log_info(msg, rule, device_group):
     """Log non-alerting changes for visibility."""
     print(f"[INFO] [{device_group}] {msg} - Rule: {rule.get('name', 'unknown')} "
           f"(from={rule.get('from')}, to={rule.get('to')}) - no alert")
+
+
+def _dg_warn(dg, rulebase, error):
+    """Log a DG failure, suppressing after repeated consecutive failures."""
+    key = f"{dg}/{rulebase}"
+    count = _dg_failures.get(key, 0) + 1
+    _dg_failures[key] = count
+
+    if count == _SUPPRESS_AFTER:
+        print(f"  WARNING: {key} has failed {count} times consecutively, suppressing further warnings")
+    elif count < _SUPPRESS_AFTER:
+        print(f"  WARNING: Could not check {key}: {error}")
+    # else: suppressed
+
+
+def _dg_ok(dg, rulebase):
+    """Clear failure tracking for a DG that succeeded. Log recovery if it was failing."""
+    key = f"{dg}/{rulebase}"
+    if key in _dg_failures:
+        if _dg_failures[key] >= _SUPPRESS_AFTER:
+            print(f"  [RECOVERED] {key} is responding again")
+        del _dg_failures[key]
 
 
 def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
@@ -116,6 +146,46 @@ def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
     return alerts
 
 
+def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
+                     data_dir, alert_log):
+    """Check one device group (pre + post rulebase). Returns alert count."""
+    alerts = 0
+
+    # Merge shared + DG-specific service objects
+    try:
+        dg_services = client.get_service_objects(dg)
+    except Exception as e:
+        _dg_warn(dg, "services", e)
+        dg_services = {}
+    service_objects = {**shared_services, **dg_services}
+
+    # Check pre-rulebase
+    try:
+        pre_xml = client.get_pre_rules(dg)
+        pre_baseline = data_dir / "baselines" / f"{dg}_pre_baseline.json"
+        alerts += _check_dg_rulebase(
+            "pre", pre_xml, pre_baseline, cfg,
+            ra_apps, service_objects, commit_ctx, dg, alert_log,
+        )
+        _dg_ok(dg, "pre")
+    except Exception as e:
+        _dg_warn(dg, "pre", e)
+
+    # Check post-rulebase
+    try:
+        post_xml = client.get_post_rules(dg)
+        post_baseline = data_dir / "baselines" / f"{dg}_post_baseline.json"
+        alerts += _check_dg_rulebase(
+            "post", post_xml, post_baseline, cfg,
+            ra_apps, service_objects, commit_ctx, dg, alert_log,
+        )
+        _dg_ok(dg, "post")
+    except Exception as e:
+        _dg_warn(dg, "post", e)
+
+    return alerts
+
+
 def run_check(cfg, client=None):
     """Run a full check cycle across all device groups. Returns total new alerts."""
     pan_cfg = cfg["panorama"]
@@ -156,46 +226,37 @@ def run_check(cfg, client=None):
     try:
         config_log = client.get_recent_config_log()
         commit_ctx = get_commit_context(config_log)
-        print(f"Last commit by: {commit_ctx['changed_by']} via {commit_ctx['client']} "
-              f"from {commit_ctx['source_ip']}")
+        print(f"Recent commits by: {commit_ctx['changed_by']}")
     except Exception as e:
         print(f"WARNING: Could not fetch config log: {e}")
         commit_ctx = {}
 
+    # Check all device groups in parallel
+    max_workers = cfg.get("max_workers", 10)
     total_alerts = 0
 
-    for dg in device_groups:
-        print(f"\n  Checking device group: {dg}")
+    print(f"Checking {len(device_groups)} device groups (max {max_workers} parallel)...")
 
-        # Merge shared + DG-specific service objects
-        try:
-            dg_services = client.get_service_objects(dg)
-        except Exception as e:
-            print(f"  WARNING: Could not fetch service objects for {dg}: {e}")
-            dg_services = {}
-        service_objects = {**shared_services, **dg_services}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(
+                _check_single_dg, dg, client, cfg, ra_apps,
+                shared_services, commit_ctx, data_dir, alert_log,
+            ): dg
+            for dg in device_groups
+        }
+        for future in as_completed(futures):
+            dg = futures[future]
+            try:
+                total_alerts += future.result()
+            except Exception as e:
+                print(f"ERROR: Unexpected failure checking {dg}: {e}", file=sys.stderr)
 
-        # Check pre-rulebase
-        try:
-            pre_xml = client.get_pre_rules(dg)
-            pre_baseline = data_dir / "baselines" / f"{dg}_pre_baseline.json"
-            total_alerts += _check_dg_rulebase(
-                "pre", pre_xml, pre_baseline, cfg,
-                ra_apps, service_objects, commit_ctx, dg, alert_log,
-            )
-        except Exception as e:
-            print(f"  WARNING: Could not check pre-rulebase for {dg}: {e}")
-
-        # Check post-rulebase
-        try:
-            post_xml = client.get_post_rules(dg)
-            post_baseline = data_dir / "baselines" / f"{dg}_post_baseline.json"
-            total_alerts += _check_dg_rulebase(
-                "post", post_xml, post_baseline, cfg,
-                ra_apps, service_objects, commit_ctx, dg, alert_log,
-            )
-        except Exception as e:
-            print(f"  WARNING: Could not check post-rulebase for {dg}: {e}")
+    # Report suppressed DGs
+    suppressed = [k for k, v in _dg_failures.items() if v >= _SUPPRESS_AFTER]
+    if suppressed:
+        print(f"[SUPPRESSED] {len(suppressed)} DG/rulebase(s) consistently failing: "
+              f"{', '.join(sorted(suppressed))}")
 
     print(f"\nCheck complete: {len(device_groups)} device groups, {total_alerts} new alerts")
     return total_alerts

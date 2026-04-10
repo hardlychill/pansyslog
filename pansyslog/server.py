@@ -8,12 +8,12 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from .api import PanoramaClient
-from .check import run_check
+from .check import run_check, _dg_failures
 from .email_alert import send_email
 
 
 class WebhookServer:
-    """Webhook listener with trailing-edge debounce."""
+    """Webhook listener with trailing-edge debounce, health and manual trigger endpoints."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -21,8 +21,14 @@ class WebhookServer:
         self.alert_log = self.data_dir / "logs" / "alerts.json"
         self.debounce_seconds = cfg["debounce_seconds"]
         self._last_check = 0
+        self._last_check_time = None
+        self._last_check_alerts = 0
+        self._total_checks = 0
+        self._total_alerts = 0
+        self._check_running = False
         self._pending = False
         self._lock = threading.Lock()
+        self._start_time = datetime.now()
 
         # Single persistent API client — one keygen for the process lifetime
         pan_cfg = cfg["panorama"]
@@ -62,6 +68,8 @@ class WebhookServer:
 
     def _do_check(self):
         """Run checks across all device groups and send email if alerts found."""
+        self._check_running = True
+
         # Snapshot alert log size
         alert_count_before = 0
         if self.alert_log.exists():
@@ -69,6 +77,12 @@ class WebhookServer:
                 alert_count_before = sum(1 for _ in f)
 
         total_new = run_check(self.cfg, client=self.client)
+
+        self._total_checks += 1
+        self._total_alerts += total_new
+        self._last_check_time = datetime.now()
+        self._last_check_alerts = total_new
+        self._check_running = False
 
         if total_new > 0:
             self._send_alert_email(alert_count_before, total_new)
@@ -125,6 +139,33 @@ class WebhookServer:
             body,
         )
 
+    def _get_health(self):
+        """Build health status dict."""
+        suppressed = [k for k, v in _dg_failures.items() if v >= 3]
+        failing = [k for k, v in _dg_failures.items() if 0 < v < 3]
+
+        alert_count = 0
+        if self.alert_log.exists():
+            with open(self.alert_log) as f:
+                alert_count = sum(1 for _ in f)
+
+        return {
+            "status": "ok" if not self._check_running else "checking",
+            "uptime_seconds": int((datetime.now() - self._start_time).total_seconds()),
+            "panorama": self.cfg["panorama"]["host"],
+            "api_key_valid": self.client._api_key is not None,
+            "api_key_obtained": self.client._key_time.isoformat() if self.client._key_time else None,
+            "total_checks": self._total_checks,
+            "total_alerts": self._total_alerts,
+            "last_check": self._last_check_time.isoformat() if self._last_check_time else None,
+            "last_check_alerts": self._last_check_alerts,
+            "alert_log_entries": alert_count,
+            "dg_failing": failing,
+            "dg_suppressed": suppressed,
+            "debounce_seconds": self.debounce_seconds,
+            "email_enabled": self.cfg["email"]["enabled"],
+        }
+
     def serve(self):
         """Start the HTTP webhook listener."""
         port = self.cfg["webhook_port"]
@@ -132,12 +173,39 @@ class WebhookServer:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
+                path = self.path.rstrip("/")
                 content_length = int(self.headers.get("Content-Length", 0))
                 self.rfile.read(content_length)
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"ok")
-                threading.Thread(target=server_ref.handle_event, daemon=True).start()
+
+                if path == "/check":
+                    # Manual trigger — bypass debounce
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "check triggered"}).encode())
+                    print("[MANUAL] Check triggered via /check endpoint")
+                    threading.Thread(target=server_ref._do_check, daemon=True).start()
+                else:
+                    # Normal webhook from Vector
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+                    threading.Thread(target=server_ref.handle_event, daemon=True).start()
+
+            def do_GET(self):
+                path = self.path.rstrip("/")
+
+                if path == "/health":
+                    health = server_ref._get_health()
+                    body = json.dumps(health, indent=2).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    self.wfile.write(b"not found")
 
             def log_message(self, format, *args):
                 pass
@@ -149,6 +217,7 @@ class WebhookServer:
         print(f"[pansyslog] Webhook server starting on port {port}")
         print(f"[pansyslog] Panorama: {pan_host}")
         print(f"[pansyslog] Device groups: {dg_label}")
+        print(f"[pansyslog] Endpoints: POST / (webhook), POST /check (manual), GET /health")
         if self.cfg["email"]["enabled"]:
             print(f"[pansyslog] Alerts will be sent to {self.cfg['email']['to']}")
         else:

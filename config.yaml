@@ -44,6 +44,7 @@ remote_access_ports:
 
 debounce_seconds: 30
 webhook_port: 8787
+max_workers: 10  # parallel device group checks
 
 email:
   enabled: true
