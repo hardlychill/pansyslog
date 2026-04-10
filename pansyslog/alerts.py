@@ -109,19 +109,29 @@ def rule_has_remote_access(rule, ra_apps, service_objects, ra_ports):
 
 def should_alert(rule, cfg, ra_apps=None, service_objects=None):
     """Determine if a rule change should trigger an alert.
-    Returns (should_alert: bool, reason: str|None)."""
+    Returns (should_alert: bool, reason: str|None).
+
+    Checks both zone-based and remote-access criteria. If both match,
+    returns a combined reason for the highest-severity alert type.
+    """
     if rule.get("action") in ("deny", "drop", "reset-client", "reset-server", "reset-both"):
         return False, None
 
-    if rule_involves_alert_zones(rule, cfg["alert_zone_prefixes"]):
-        return True, "insecure-zone"
+    is_zone = rule_involves_alert_zones(rule, cfg["alert_zone_prefixes"])
 
+    is_ra = False
+    ra_reason = None
     if ra_apps is not None and service_objects is not None:
         is_ra, ra_reason = rule_has_remote_access(
             rule, ra_apps, service_objects, cfg["remote_access_port_set"]
         )
-        if is_ra:
-            return True, f"remote-access: {ra_reason}"
+
+    if is_zone and is_ra:
+        return True, f"critical-segmentation-ra: insecure zone pair + {ra_reason}"
+    if is_zone:
+        return True, "insecure-zone"
+    if is_ra:
+        return True, f"remote-access: {ra_reason}"
 
     return False, None
 
@@ -129,6 +139,8 @@ def should_alert(rule, cfg, ra_apps=None, service_objects=None):
 def alert_type_for(reason, action):
     """Map trigger reason + action (added/removed/modified) to alert type string."""
     action = action.upper()
+    if reason and reason.startswith("critical-segmentation-ra"):
+        return f"CRITICAL_SEGMENTATION_REMOTE_ACCESS_{action}"
     if reason and reason.startswith("remote-access"):
         return f"REMOTE_ACCESS_RULE_{action}"
     return f"BREAK_OF_SEGMENTATION_{action}"
