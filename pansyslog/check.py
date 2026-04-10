@@ -22,7 +22,8 @@ _SUPPRESS_AFTER = 3  # suppress warnings after this many consecutive failures
 _alert_log_lock = threading.Lock()
 
 
-def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group):
+def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group,
+              tracker=None):
     """Write a single alert entry to the JSONL alert log."""
     ctx = commit_ctx or {}
     alert = {
@@ -52,6 +53,10 @@ def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group):
         alert_log.parent.mkdir(parents=True, exist_ok=True)
         with open(alert_log, "a") as f:
             f.write(json.dumps(alert) + "\n")
+
+    # Track as unacknowledged
+    if tracker is not None:
+        tracker.record(device_group, alert["rule_name"], alert_type, details)
 
 
 def log_info(msg, rule, device_group):
@@ -83,7 +88,7 @@ def _dg_ok(dg, rulebase):
 
 
 def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
-                     commit_ctx, device_group, alert_log):
+                     commit_ctx, device_group, alert_log, tracker=None):
     """Check a list of added or removed rules. Returns alert count."""
     alerts = 0
     for rule in rules:
@@ -94,7 +99,7 @@ def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
                       f"{rule['from']} -> {rule['to']}, "
                       f"app={rule['application']}, service={rule.get('service', ['?'])}, "
                       f"action={rule['action']}. Trigger: {reason}",
-                      commit_ctx, device_group)
+                      commit_ctx, device_group, tracker=tracker)
             alerts += 1
         else:
             log_info(f"Rule {action_label.lower()}", rule, device_group)
@@ -102,52 +107,60 @@ def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
 
 
 def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
-                       ra_apps, service_objects, commit_ctx, device_group, alert_log):
+                       ra_apps, service_objects, commit_ctx, device_group, alert_log,
+                       tracker=None):
     """Diff one rulebase (pre or post) for a device group. Returns alert count."""
     current_rules = parse_rules(rules_xml)
     baseline_rules = load_baseline(baseline_file)
     alerts = 0
 
-    if baseline_rules is not None:
-        added, removed, modified = diff_rules(baseline_rules, current_rules)
+    try:
+        if baseline_rules is not None:
+            added, removed, modified = diff_rules(baseline_rules, current_rules)
 
-        if not added and not removed and not modified:
-            pass  # no changes
+            if not added and not removed and not modified:
+                pass  # no changes
+            else:
+                print(f"  [{device_group}/{rulebase_label}] "
+                      f"+{len(added)} added, -{len(removed)} removed, ~{len(modified)} modified")
+
+                alerts += _check_rule_list(added, "ADDED", cfg, ra_apps,
+                                           service_objects, commit_ctx, device_group, alert_log, tracker)
+                alerts += _check_rule_list(removed, "REMOVED", cfg, ra_apps,
+                                           service_objects, commit_ctx, device_group, alert_log, tracker)
+
+                for change in modified:
+                    new_rule = change["new"]
+                    old_rule = change["old"]
+                    new_triggered, new_reason = should_alert(new_rule, cfg, ra_apps, service_objects)
+                    old_triggered, old_reason = should_alert(old_rule, cfg, ra_apps, service_objects)
+                    if new_triggered or old_triggered:
+                        reason = new_reason or old_reason
+                        diff_str = format_modified_diff(old_rule, new_rule)
+                        log_alert(alert_log, alert_type_for(reason, "MODIFIED"), change,
+                                  f"Rule '{new_rule['name']}' modified: {diff_str}. "
+                                  f"Now: {new_rule['from']} -> {new_rule['to']}, "
+                                  f"app={new_rule['application']}, service={new_rule.get('service', ['?'])}, "
+                                  f"action={new_rule['action']}. Trigger: {reason}",
+                                  commit_ctx, device_group, tracker=tracker)
+                        alerts += 1
+                    else:
+                        log_info("Rule modified", new_rule, device_group)
         else:
-            print(f"  [{device_group}/{rulebase_label}] "
-                  f"+{len(added)} added, -{len(removed)} removed, ~{len(modified)} modified")
+            print(f"  [{device_group}/{rulebase_label}] No baseline — saving {len(current_rules)} rules")
+    except Exception as e:
+        print(f"  ERROR: Alert processing failed for {device_group}/{rulebase_label}: {e}",
+              file=sys.stderr)
+    finally:
+        # Always update baseline — even if alerting fails — to prevent
+        # the same rules from re-alerting on every subsequent check cycle
+        save_baseline(baseline_file, current_rules)
 
-            alerts += _check_rule_list(added, "ADDED", cfg, ra_apps,
-                                       service_objects, commit_ctx, device_group, alert_log)
-            alerts += _check_rule_list(removed, "REMOVED", cfg, ra_apps,
-                                       service_objects, commit_ctx, device_group, alert_log)
-
-            for change in modified:
-                new_rule = change["new"]
-                old_rule = change["old"]
-                new_triggered, new_reason = should_alert(new_rule, cfg, ra_apps, service_objects)
-                old_triggered, old_reason = should_alert(old_rule, cfg, ra_apps, service_objects)
-                if new_triggered or old_triggered:
-                    reason = new_reason or old_reason
-                    diff_str = format_modified_diff(old_rule, new_rule)
-                    log_alert(alert_log, alert_type_for(reason, "MODIFIED"), change,
-                              f"Rule '{new_rule['name']}' modified: {diff_str}. "
-                              f"Now: {new_rule['from']} -> {new_rule['to']}, "
-                              f"app={new_rule['application']}, service={new_rule.get('service', ['?'])}, "
-                              f"action={new_rule['action']}. Trigger: {reason}",
-                              commit_ctx, device_group)
-                    alerts += 1
-                else:
-                    log_info("Rule modified", new_rule, device_group)
-    else:
-        print(f"  [{device_group}/{rulebase_label}] No baseline — saving {len(current_rules)} rules")
-
-    save_baseline(baseline_file, current_rules)
     return alerts
 
 
 def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
-                     data_dir, alert_log):
+                     data_dir, alert_log, tracker=None):
     """Check one device group (pre + post rulebase). Returns alert count."""
     alerts = 0
 
@@ -165,7 +178,7 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
         pre_baseline = data_dir / "baselines" / f"{dg}_pre_baseline.json"
         alerts += _check_dg_rulebase(
             "pre", pre_xml, pre_baseline, cfg,
-            ra_apps, service_objects, commit_ctx, dg, alert_log,
+            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker,
         )
         _dg_ok(dg, "pre")
     except Exception as e:
@@ -177,7 +190,7 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
         post_baseline = data_dir / "baselines" / f"{dg}_post_baseline.json"
         alerts += _check_dg_rulebase(
             "post", post_xml, post_baseline, cfg,
-            ra_apps, service_objects, commit_ctx, dg, alert_log,
+            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker,
         )
         _dg_ok(dg, "post")
     except Exception as e:
@@ -186,7 +199,7 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
     return alerts
 
 
-def run_check(cfg, client=None):
+def run_check(cfg, client=None, tracker=None):
     """Run a full check cycle across all device groups. Returns total new alerts."""
     pan_cfg = cfg["panorama"]
     data_dir = Path(cfg["data_dir"])
@@ -241,7 +254,7 @@ def run_check(cfg, client=None):
         futures = {
             pool.submit(
                 _check_single_dg, dg, client, cfg, ra_apps,
-                shared_services, commit_ctx, data_dir, alert_log,
+                shared_services, commit_ctx, data_dir, alert_log, tracker,
             ): dg
             for dg in device_groups
         }

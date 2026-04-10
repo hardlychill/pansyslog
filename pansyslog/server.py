@@ -10,6 +10,7 @@ from pathlib import Path
 from .api import PanoramaClient
 from .check import run_check, _dg_failures
 from .email_alert import send_email
+from .tracker import AlertTracker
 
 
 class WebhookServer:
@@ -36,6 +37,50 @@ class WebhookServer:
             pan_cfg["host"], pan_cfg["user"], pan_cfg["password"],
             data_dir=cfg["data_dir"],
         )
+
+        # Unacknowledged alert tracker
+        renotify_hours = cfg.get("renotify_hours", 24)
+        self.tracker = AlertTracker(cfg["data_dir"], renotify_hours=renotify_hours)
+
+        # Start re-notification background thread
+        if renotify_hours > 0:
+            self._start_renotify_loop(renotify_hours)
+
+    def _start_renotify_loop(self, interval_hours):
+        """Background thread that checks for due re-notifications."""
+        def _loop():
+            # Check every hour
+            while True:
+                time.sleep(3600)
+                due = self.tracker.get_due_renotifications()
+                if due:
+                    print(f"[RENOTIFY] {len(due)} unacknowledged alert(s) due for re-notification")
+                    details = []
+                    for key, alert in due:
+                        details.append(
+                            f"Type: {alert['alert_type']}\n"
+                            f"Device Group: {alert['device_group']}\n"
+                            f"Rule: {alert['rule_name']}\n"
+                            f"First seen: {alert['first_seen']}\n"
+                            f"Notification #: {alert['notify_count']}\n"
+                            f"Details: {alert['details']}"
+                        )
+                    host = self.cfg["panorama"]["host"]
+                    body = (
+                        f"pansyslog REMINDER: {len(due)} unacknowledged insecure rule(s) "
+                        f"on Panorama ({host}):\n\n"
+                        + "\n---\n".join(details)
+                        + f"\n\nAcknowledge via: POST http://<pansyslog>:8787/acknowledge"
+                    )
+                    send_email(
+                        self.cfg,
+                        f"[pansyslog] REMINDER: {len(due)} unacknowledged alert(s)",
+                        body,
+                    )
+
+        t = threading.Thread(target=_loop, daemon=True)
+        t.start()
+        print(f"[pansyslog] Re-notification enabled: every {interval_hours}h for unacknowledged alerts")
 
     def _deferred_check(self, delay):
         """Wait for debounce window to expire, then run if still pending."""
@@ -76,7 +121,7 @@ class WebhookServer:
             with open(self.alert_log) as f:
                 alert_count_before = sum(1 for _ in f)
 
-        total_new = run_check(self.cfg, client=self.client)
+        total_new = run_check(self.cfg, client=self.client, tracker=self.tracker)
 
         self._total_checks += 1
         self._total_alerts += total_new
@@ -164,6 +209,8 @@ class WebhookServer:
             "dg_suppressed": suppressed,
             "debounce_seconds": self.debounce_seconds,
             "email_enabled": self.cfg["email"]["enabled"],
+            "unacknowledged_alerts": len(self.tracker.list_active()),
+            "renotify_hours": self.cfg.get("renotify_hours", 24),
         }
 
     def serve(self):
@@ -172,19 +219,47 @@ class WebhookServer:
         server_ref = self
 
         class Handler(BaseHTTPRequestHandler):
+            def _json_response(self, code, data):
+                body = json.dumps(data, indent=2).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self):
                 path = self.path.rstrip("/")
                 content_length = int(self.headers.get("Content-Length", 0))
-                self.rfile.read(content_length)
+                raw = self.rfile.read(content_length)
 
                 if path == "/check":
-                    # Manual trigger — bypass debounce
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "check triggered"}).encode())
+                    self._json_response(200, {"status": "check triggered"})
                     print("[MANUAL] Check triggered via /check endpoint")
                     threading.Thread(target=server_ref._do_check, daemon=True).start()
+
+                elif path == "/acknowledge":
+                    try:
+                        body = json.loads(raw.decode()) if raw else {}
+                    except json.JSONDecodeError:
+                        self._json_response(400, {"error": "invalid JSON"})
+                        return
+
+                    if body.get("all"):
+                        count = server_ref.tracker.acknowledge_all()
+                        print(f"[ACK] All {count} alerts acknowledged")
+                        self._json_response(200, {"acknowledged": count})
+                    else:
+                        dg = body.get("device_group", "")
+                        rule = body.get("rule_name", "")
+                        key = body.get("key", "")
+                        found = server_ref.tracker.acknowledge(
+                            device_group=dg, rule_name=rule, key=key,
+                        )
+                        if found:
+                            print(f"[ACK] Acknowledged: {key or f'{dg}/{rule}'}")
+                            self._json_response(200, {"acknowledged": True})
+                        else:
+                            self._json_response(404, {"error": "alert not found"})
+
                 else:
                     # Normal webhook from Vector
                     self.send_response(200)
@@ -196,12 +271,11 @@ class WebhookServer:
                 path = self.path.rstrip("/")
 
                 if path == "/health":
-                    health = server_ref._get_health()
-                    body = json.dumps(health, indent=2).encode()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(body)
+                    self._json_response(200, server_ref._get_health())
+
+                elif path == "/active-alerts":
+                    self._json_response(200, server_ref.tracker.list_active())
+
                 else:
                     self.send_response(404)
                     self.end_headers()
@@ -217,7 +291,8 @@ class WebhookServer:
         print(f"[pansyslog] Webhook server starting on port {port}")
         print(f"[pansyslog] Panorama: {pan_host}")
         print(f"[pansyslog] Device groups: {dg_label}")
-        print(f"[pansyslog] Endpoints: POST / (webhook), POST /check (manual), GET /health")
+        print(f"[pansyslog] Endpoints: POST / (webhook), POST /check (manual), "
+              f"POST /acknowledge, GET /health, GET /active-alerts")
         if self.cfg["email"]["enabled"]:
             print(f"[pansyslog] Alerts will be sent to {self.cfg['email']['to']}")
         else:
