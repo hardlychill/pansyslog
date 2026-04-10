@@ -205,9 +205,9 @@ class PanoramaClient:
                 services[name] = ports
         return services
 
-    def get_remote_access_apps(self):
-        """Fetch apps with subcategory 'remote-access'. Cached to disk for 24h."""
-        cache = self.data_dir / "baselines" / "remote_access_apps.json"
+    def _get_apps_by_subcategory(self, subcategory):
+        """Fetch app names by PAN-OS subcategory. Cached to disk for 24h."""
+        cache = self.data_dir / "baselines" / f"{subcategory}_apps.json"
         if cache.exists():
             age = (datetime.now() - datetime.fromtimestamp(cache.stat().st_mtime)).total_seconds()
             if age < 86400:
@@ -217,7 +217,7 @@ class PanoramaClient:
             "type": "config",
             "action": "get",
             "key": self.api_key,
-            "xpath": "/config/predefined/application/entry[subcategory='remote-access']",
+            "xpath": f"/config/predefined/application/entry[subcategory='{subcategory}']",
         }, timeout=30)
         root = ET.fromstring(resp.text)
         apps = set()
@@ -229,8 +229,16 @@ class PanoramaClient:
         cache.parent.mkdir(parents=True, exist_ok=True)
         with open(cache, "w") as f:
             json.dump(sorted(apps), f)
-        print(f"Cached {len(apps)} remote-access apps")
+        print(f"Cached {len(apps)} {subcategory} apps")
         return apps
+
+    def get_remote_access_apps(self):
+        """Fetch apps with subcategory 'remote-access'. Cached to disk for 24h."""
+        return self._get_apps_by_subcategory("remote-access")
+
+    def get_file_sharing_apps(self):
+        """Fetch apps with subcategory 'file-sharing'. Cached to disk for 24h."""
+        return self._get_apps_by_subcategory("file-sharing")
 
     def get_recent_config_log(self, nlogs=50):
         """Pull recent config audit log entries for commit metadata."""

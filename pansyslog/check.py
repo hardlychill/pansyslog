@@ -88,11 +88,11 @@ def _dg_ok(dg, rulebase):
 
 
 def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
-                     commit_ctx, device_group, alert_log, tracker=None):
+                     commit_ctx, device_group, alert_log, tracker=None, fs_apps=None):
     """Check a list of added or removed rules. Returns alert count."""
     alerts = 0
     for rule in rules:
-        triggered, reason = should_alert(rule, cfg, ra_apps, service_objects)
+        triggered, reason = should_alert(rule, cfg, ra_apps, service_objects, fs_apps=fs_apps)
         if triggered:
             log_alert(alert_log, alert_type_for(reason, action_label), rule,
                       f"Rule '{rule['name']}' {action_label.lower()}: "
@@ -108,7 +108,7 @@ def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
 
 def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
                        ra_apps, service_objects, commit_ctx, device_group, alert_log,
-                       tracker=None):
+                       tracker=None, fs_apps=None):
     """Diff one rulebase (pre or post) for a device group. Returns alert count."""
     current_rules = parse_rules(rules_xml)
     baseline_rules = load_baseline(baseline_file)
@@ -125,15 +125,15 @@ def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
                       f"+{len(added)} added, -{len(removed)} removed, ~{len(modified)} modified")
 
                 alerts += _check_rule_list(added, "ADDED", cfg, ra_apps,
-                                           service_objects, commit_ctx, device_group, alert_log, tracker)
+                                           service_objects, commit_ctx, device_group, alert_log, tracker, fs_apps)
                 alerts += _check_rule_list(removed, "REMOVED", cfg, ra_apps,
-                                           service_objects, commit_ctx, device_group, alert_log, tracker)
+                                           service_objects, commit_ctx, device_group, alert_log, tracker, fs_apps)
 
                 for change in modified:
                     new_rule = change["new"]
                     old_rule = change["old"]
-                    new_triggered, new_reason = should_alert(new_rule, cfg, ra_apps, service_objects)
-                    old_triggered, old_reason = should_alert(old_rule, cfg, ra_apps, service_objects)
+                    new_triggered, new_reason = should_alert(new_rule, cfg, ra_apps, service_objects, fs_apps=fs_apps)
+                    old_triggered, old_reason = should_alert(old_rule, cfg, ra_apps, service_objects, fs_apps=fs_apps)
                     if new_triggered or old_triggered:
                         reason = new_reason or old_reason
                         diff_str = format_modified_diff(old_rule, new_rule)
@@ -160,7 +160,7 @@ def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
 
 
 def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
-                     data_dir, alert_log, tracker=None):
+                     data_dir, alert_log, tracker=None, fs_apps=None):
     """Check one device group (pre + post rulebase). Returns alert count."""
     alerts = 0
 
@@ -178,7 +178,7 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
         pre_baseline = data_dir / "baselines" / f"{dg}_pre_baseline.json"
         alerts += _check_dg_rulebase(
             "pre", pre_xml, pre_baseline, cfg,
-            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker,
+            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker, fs_apps,
         )
         _dg_ok(dg, "pre")
     except Exception as e:
@@ -190,7 +190,7 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
         post_baseline = data_dir / "baselines" / f"{dg}_post_baseline.json"
         alerts += _check_dg_rulebase(
             "post", post_xml, post_baseline, cfg,
-            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker,
+            ra_apps, service_objects, commit_ctx, dg, alert_log, tracker, fs_apps,
         )
         _dg_ok(dg, "post")
     except Exception as e:
@@ -229,6 +229,13 @@ def run_check(cfg, client=None, tracker=None):
         ra_apps = set()
 
     try:
+        fs_apps = client.get_file_sharing_apps()
+        print(f"Loaded {len(fs_apps)} file-sharing apps")
+    except Exception as e:
+        print(f"WARNING: Could not fetch file-sharing apps: {e}")
+        fs_apps = set()
+
+    try:
         shared_services = client.get_shared_service_objects()
         if shared_services:
             print(f"Loaded {len(shared_services)} shared service objects")
@@ -254,7 +261,7 @@ def run_check(cfg, client=None, tracker=None):
         futures = {
             pool.submit(
                 _check_single_dg, dg, client, cfg, ra_apps,
-                shared_services, commit_ctx, data_dir, alert_log, tracker,
+                shared_services, commit_ctx, data_dir, alert_log, tracker, fs_apps,
             ): dg
             for dg in device_groups
         }

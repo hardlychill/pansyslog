@@ -107,12 +107,28 @@ def rule_has_remote_access(rule, ra_apps, service_objects, ra_ports):
     return False, None
 
 
-def should_alert(rule, cfg, ra_apps=None, service_objects=None):
+def rule_has_file_sharing(rule, fs_apps):
+    """Check if a rule allows file-sharing apps.
+    Returns (True, reason) or (False, None)."""
+    apps = set(rule.get("application", []))
+
+    # app=any means all apps including file-sharing
+    if "any" in apps:
+        return True, "application=any (allows all apps including file-sharing)"
+
+    fs_match = apps & fs_apps
+    if fs_match:
+        return True, f"file-sharing app(s): {sorted(fs_match)}"
+
+    return False, None
+
+
+def should_alert(rule, cfg, ra_apps=None, service_objects=None, fs_apps=None):
     """Determine if a rule change should trigger an alert.
     Returns (should_alert: bool, reason: str|None).
 
-    Checks both zone-based and remote-access criteria. If both match,
-    returns a combined reason for the highest-severity alert type.
+    Checks zone-based, remote-access, and file-sharing criteria.
+    Combined matches produce higher-severity alert types.
     """
     if rule.get("action") in ("deny", "drop", "reset-client", "reset-server", "reset-both"):
         return False, None
@@ -126,12 +142,33 @@ def should_alert(rule, cfg, ra_apps=None, service_objects=None):
             rule, ra_apps, service_objects, cfg["remote_access_port_set"]
         )
 
+    is_fs = False
+    fs_reason = None
+    if fs_apps is not None:
+        is_fs, fs_reason = rule_has_file_sharing(rule, fs_apps)
+
+    # Build combined reason for rules that match multiple criteria
+    reasons = []
+    if is_zone:
+        reasons.append("insecure zone pair")
+    if is_ra:
+        reasons.append(ra_reason)
+    if is_fs:
+        reasons.append(fs_reason)
+
+    if not reasons:
+        return False, None
+
     if is_zone and is_ra:
-        return True, f"critical-segmentation-ra: insecure zone pair + {ra_reason}"
+        return True, f"critical-segmentation-ra: {' + '.join(reasons)}"
+    if is_zone and is_fs:
+        return True, f"critical-segmentation-fs: {' + '.join(reasons)}"
     if is_zone:
         return True, "insecure-zone"
     if is_ra:
         return True, f"remote-access: {ra_reason}"
+    if is_fs:
+        return True, f"file-sharing: {fs_reason}"
 
     return False, None
 
@@ -141,8 +178,12 @@ def alert_type_for(reason, action):
     action = action.upper()
     if reason and reason.startswith("critical-segmentation-ra"):
         return f"CRITICAL_SEGMENTATION_REMOTE_ACCESS_{action}"
+    if reason and reason.startswith("critical-segmentation-fs"):
+        return f"CRITICAL_SEGMENTATION_FILE_SHARING_{action}"
     if reason and reason.startswith("remote-access"):
         return f"REMOTE_ACCESS_RULE_{action}"
+    if reason and reason.startswith("file-sharing"):
+        return f"FILE_SHARING_RULE_{action}"
     return f"BREAK_OF_SEGMENTATION_{action}"
 
 
