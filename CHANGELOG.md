@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-04-10 — Alert Classification Improvements
+
+### New Features
+
+- **CRITICAL_SEGMENTATION_REMOTE_ACCESS alert type** — Rules that break zone segmentation AND allow remote access now fire a dedicated critical alert instead of reporting only one condition. Alert details include both the zone violation and the specific remote-access trigger.
+
+- **FILE_SHARING_RULE alert type** — New alert for rules that allow file-sharing applications. Uses PAN-OS `file-sharing` subcategory (same approach as remote-access detection). Fires on rules with explicit file-sharing apps or `app=any`. Also has a critical combined variant (`CRITICAL_SEGMENTATION_FILE_SHARING`) when paired with a zone break.
+
+- **Combined alert context** — `should_alert` now evaluates all criteria (zone, remote-access, file-sharing) for every rule instead of short-circuiting on the first match. Alerts include full context of all violations.
+
+### Alert Type Hierarchy
+
+| Type | Severity | Condition |
+|------|----------|-----------|
+| `CRITICAL_SEGMENTATION_REMOTE_ACCESS` | Critical | Zone break + remote access |
+| `CRITICAL_SEGMENTATION_FILE_SHARING` | Critical | Zone break + file sharing |
+| `BREAK_OF_SEGMENTATION` | High | Zone pair violation only |
+| `REMOTE_ACCESS_RULE` | Medium | Remote access (any zone) |
+| `FILE_SHARING_RULE` | Medium | File sharing (any zone) |
+
+Deny/drop rules never alert regardless of apps or zones.
+
+### Data Changes
+
+- New cache file: `/data/baselines/file-sharing_apps.json` (auto-created, 24h TTL)
+
+### Upgrade Instructions
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+No config changes required. File-sharing detection is enabled automatically.
+
+---
+
 ## 2026-04-09 — Post-Production Test Patch
 
 Changes made after initial production deployment and testing against live Panorama environment.

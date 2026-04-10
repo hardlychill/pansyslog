@@ -65,12 +65,19 @@ Env var overrides: `PAN_HOST`, `PAN_USER`, `PAN_PASS`, `SMTP_USER`, `SMTP_PASS`,
 
 ## Alert Types
 
-**BREAK_OF_SEGMENTATION** — allow rule between zones matching configured prefix pairs (e.g., any `untrust-*` zone to/from any `trust-*` zone)
+| Type | Severity | Condition |
+|------|----------|-----------|
+| **CRITICAL_SEGMENTATION_REMOTE_ACCESS** | Critical | Zone break + remote access |
+| **CRITICAL_SEGMENTATION_FILE_SHARING** | Critical | Zone break + file sharing |
+| **BREAK_OF_SEGMENTATION** | High | Zone pair violation only |
+| **REMOTE_ACCESS_RULE** | Medium | Remote access (any zone) |
+| **FILE_SHARING_RULE** | Medium | File sharing (any zone) |
 
-**REMOTE_ACCESS_RULE** — rule allowing remote-access traffic via:
-- App matching PAN-OS `remote-access` subcategory (~197 apps)
-- Port-based service objects resolving to known RA ports (RDP, SSH, VNC, etc.)
-- Wide-open rules (app=any + service=any)
+Rules that match multiple criteria produce the highest-severity combined alert with full context.
+
+**Remote access detection:** App matching PAN-OS `remote-access` subcategory, port-based service objects resolving to known RA ports (RDP, SSH, VNC, etc.), or wide-open rules (app=any + service=any).
+
+**File sharing detection:** App matching PAN-OS `file-sharing` subcategory, or `app=any`.
 
 Deny/drop rules never alert.
 
