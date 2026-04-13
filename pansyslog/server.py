@@ -264,6 +264,49 @@ class WebhookServer:
                         else:
                             self._json_response(404, {"error": "alert not found"})
 
+                elif path == "/baseline/reset":
+                    try:
+                        body = json.loads(raw.decode()) if raw else {}
+                    except json.JSONDecodeError:
+                        self._json_response(400, {"error": "invalid JSON"})
+                        return
+
+                    baseline_dir = server_ref.data_dir / "baselines"
+                    dg = body.get("device_group", "")
+                    reset_all = body.get("all", False)
+                    removed = []
+
+                    if reset_all:
+                        for f in baseline_dir.glob("*_baseline.json"):
+                            f.unlink()
+                            removed.append(f.name)
+                        print(f"[RESET] All baselines cleared ({len(removed)} files)")
+                    elif dg:
+                        for rb in ("pre", "post"):
+                            f = baseline_dir / f"{dg}_{rb}_baseline.json"
+                            if f.exists():
+                                f.unlink()
+                                removed.append(f.name)
+                        print(f"[RESET] Baselines cleared for {dg}")
+                    else:
+                        self._json_response(400, {"error": "provide device_group or all:true"})
+                        return
+
+                    self._json_response(200, {"reset": removed, "count": len(removed)})
+                    # Trigger immediate re-check
+                    print("[RESET] Triggering re-check...")
+                    threading.Thread(target=server_ref._do_check, daemon=True).start()
+
+                elif path == "/reauth":
+                    try:
+                        server_ref.client._refresh_key()
+                        self._json_response(200, {
+                            "status": "ok",
+                            "api_key_obtained": server_ref.client._key_time.isoformat(),
+                        })
+                    except Exception as e:
+                        self._json_response(500, {"error": str(e)})
+
                 else:
                     # Normal webhook from Vector
                     self.send_response(200)
@@ -283,6 +326,42 @@ class WebhookServer:
                     else:
                         self._json_response(200, {"status": "disabled", "message": "set renotify_hours > 0 to enable"})
 
+                elif path == "/check-history":
+                    history_file = server_ref.data_dir / "logs" / "check_history.json"
+                    entries = []
+                    if history_file.exists():
+                        with open(history_file) as f:
+                            for line in f:
+                                line = line.strip()
+                                if line:
+                                    entries.append(json.loads(line))
+                    self._json_response(200, entries)
+
+                elif path == "/alerts":
+                    alert_log = server_ref.alert_log
+                    entries = []
+                    if alert_log.exists():
+                        with open(alert_log) as f:
+                            for line in f:
+                                line = line.strip()
+                                if line:
+                                    entries.append(json.loads(line))
+                    self._json_response(200, entries)
+
+                elif path == "/baselines":
+                    baseline_dir = server_ref.data_dir / "baselines"
+                    baselines = {}
+                    for f in sorted(baseline_dir.glob("*_baseline.json")):
+                        name = f.stem  # e.g. "DG-datacenter_pre_baseline"
+                        with open(f) as fh:
+                            rules = json.load(fh)
+                        baselines[name] = {
+                            "file": f.name,
+                            "rule_count": len(rules),
+                            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                        }
+                    self._json_response(200, baselines)
+
                 else:
                     self.send_response(404)
                     self.end_headers()
@@ -298,8 +377,8 @@ class WebhookServer:
         print(f"[pansyslog] Webhook server starting on port {port}")
         print(f"[pansyslog] Panorama: {pan_host}")
         print(f"[pansyslog] Device groups: {dg_label}")
-        print(f"[pansyslog] Endpoints: POST / (webhook), POST /check (manual), "
-              f"POST /acknowledge, GET /health, GET /active-alerts")
+        print(f"[pansyslog] Endpoints: POST /(webhook) /check /acknowledge /baseline/reset /reauth | "
+              f"GET /health /active-alerts /check-history /alerts /baselines")
         if self.cfg["email"]["enabled"]:
             print(f"[pansyslog] Alerts will be sent to {self.cfg['email']['to']}")
         else:

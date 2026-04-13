@@ -109,13 +109,26 @@ def _check_rule_list(rules, action_label, cfg, ra_apps, service_objects,
 def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
                        ra_apps, service_objects, commit_ctx, device_group, alert_log,
                        tracker=None, fs_apps=None):
-    """Diff one rulebase (pre or post) for a device group. Returns alert count."""
+    """Diff one rulebase (pre or post) for a device group. Returns (alert_count, rule_count)."""
     current_rules = parse_rules(rules_xml)
     baseline_rules = load_baseline(baseline_file)
     alerts = 0
 
     try:
         if baseline_rules is not None:
+            # Baseline protection: don't overwrite a populated baseline with empty results
+            if len(current_rules) == 0 and len(baseline_rules) > 0:
+                print(f"  [{device_group}/{rulebase_label}] BASELINE ANOMALY: "
+                      f"API returned 0 rules but baseline has {len(baseline_rules)}. "
+                      f"Baseline preserved.")
+                log_alert(alert_log, f"BASELINE_ANOMALY_{rulebase_label.upper()}",
+                          {"name": f"{device_group}/{rulebase_label}"},
+                          f"Device group '{device_group}' {rulebase_label}-rulebase returned 0 rules "
+                          f"but baseline has {len(baseline_rules)}. "
+                          f"Possible API error or misconfiguration. Baseline NOT overwritten.",
+                          commit_ctx, device_group, tracker=tracker)
+                return alerts, len(baseline_rules)
+
             added, removed, modified = diff_rules(baseline_rules, current_rules)
 
             if not added and not removed and not modified:
@@ -147,22 +160,22 @@ def _check_dg_rulebase(rulebase_label, rules_xml, baseline_file, cfg,
                     else:
                         log_info("Rule modified", new_rule, device_group)
         else:
-            print(f"  [{device_group}/{rulebase_label}] No baseline — saving {len(current_rules)} rules")
+            print(f"  [{device_group}/{rulebase_label}] First run — saving {len(current_rules)} rules as baseline")
     except Exception as e:
         print(f"  ERROR: Alert processing failed for {device_group}/{rulebase_label}: {e}",
               file=sys.stderr)
-    finally:
-        # Always update baseline — even if alerting fails — to prevent
-        # the same rules from re-alerting on every subsequent check cycle
-        save_baseline(baseline_file, current_rules)
 
-    return alerts
+    # Save baseline (skip if anomaly was detected — handled above with early return)
+    save_baseline(baseline_file, current_rules)
+
+    return alerts, len(current_rules)
 
 
 def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
                      data_dir, alert_log, tracker=None, fs_apps=None):
-    """Check one device group (pre + post rulebase). Returns alert count."""
-    alerts = 0
+    """Check one device group (pre + post rulebase).
+    Returns dict with alerts count and rule counts."""
+    result = {"alerts": 0, "dg": dg, "pre_rules": 0, "post_rules": 0}
 
     # Merge shared + DG-specific service objects
     try:
@@ -176,10 +189,12 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
     try:
         pre_xml = client.get_pre_rules(dg)
         pre_baseline = data_dir / "baselines" / f"{dg}_pre_baseline.json"
-        alerts += _check_dg_rulebase(
+        alert_count, rule_count = _check_dg_rulebase(
             "pre", pre_xml, pre_baseline, cfg,
             ra_apps, service_objects, commit_ctx, dg, alert_log, tracker, fs_apps,
         )
+        result["alerts"] += alert_count
+        result["pre_rules"] = rule_count
         _dg_ok(dg, "pre")
     except Exception as e:
         _dg_warn(dg, "pre", e)
@@ -188,15 +203,17 @@ def _check_single_dg(dg, client, cfg, ra_apps, shared_services, commit_ctx,
     try:
         post_xml = client.get_post_rules(dg)
         post_baseline = data_dir / "baselines" / f"{dg}_post_baseline.json"
-        alerts += _check_dg_rulebase(
+        alert_count, rule_count = _check_dg_rulebase(
             "post", post_xml, post_baseline, cfg,
             ra_apps, service_objects, commit_ctx, dg, alert_log, tracker, fs_apps,
         )
+        result["alerts"] += alert_count
+        result["post_rules"] = rule_count
         _dg_ok(dg, "post")
     except Exception as e:
         _dg_warn(dg, "post", e)
 
-    return alerts
+    return result
 
 
 def run_check(cfg, client=None, tracker=None):
@@ -251,9 +268,18 @@ def run_check(cfg, client=None, tracker=None):
         print(f"WARNING: Could not fetch config log: {e}")
         commit_ctx = {}
 
+    # Detect if this is a first run (no baselines exist yet)
+    baseline_dir = data_dir / "baselines"
+    is_first_run = not any(
+        f.name.endswith("_baseline.json") and not f.name.startswith("remote_access")
+        and not f.name.startswith("file-sharing")
+        for f in baseline_dir.iterdir() if f.is_file()
+    ) if baseline_dir.exists() else True
+
     # Check all device groups in parallel
     max_workers = cfg.get("max_workers", 10)
     total_alerts = 0
+    dg_results = []
 
     print(f"Checking {len(device_groups)} device groups (max {max_workers} parallel)...")
 
@@ -268,9 +294,47 @@ def run_check(cfg, client=None, tracker=None):
         for future in as_completed(futures):
             dg = futures[future]
             try:
-                total_alerts += future.result()
+                result = future.result()
+                total_alerts += result["alerts"]
+                dg_results.append(result)
             except Exception as e:
                 print(f"ERROR: Unexpected failure checking {dg}: {e}", file=sys.stderr)
+
+    # First run summary — show empty vs populated so admin can verify
+    if is_first_run and dg_results:
+        empty_pre = sorted(r["dg"] for r in dg_results if r["pre_rules"] == 0)
+        empty_post = sorted(r["dg"] for r in dg_results if r["post_rules"] == 0)
+        populated_pre = sorted((r["dg"], r["pre_rules"]) for r in dg_results if r["pre_rules"] > 0)
+        populated_post = sorted((r["dg"], r["post_rules"]) for r in dg_results if r["post_rules"] > 0)
+
+        print(f"\n{'='*60}")
+        print(f"FIRST RUN SUMMARY — Baselines created for {len(dg_results)} device groups")
+        print(f"{'='*60}")
+
+        if empty_pre:
+            print(f"\nEmpty pre-rulebases ({len(empty_pre)}) — verify these are expected:")
+            for dg in empty_pre:
+                print(f"  {dg}/pre — 0 rules")
+
+        if empty_post:
+            print(f"\nEmpty post-rulebases ({len(empty_post)}) — verify these are expected:")
+            for dg in empty_post:
+                print(f"  {dg}/post — 0 rules")
+
+        if populated_pre:
+            print(f"\nPopulated pre-rulebases ({len(populated_pre)}):")
+            for dg, count in populated_pre:
+                print(f"  {dg}/pre — {count} rules")
+
+        if populated_post:
+            print(f"\nPopulated post-rulebases ({len(populated_post)}):")
+            for dg, count in populated_post:
+                print(f"  {dg}/post — {count} rules")
+
+        print(f"{'='*60}\n")
+
+    # Save check result for history
+    _save_check_history(data_dir, len(device_groups), total_alerts, dg_results)
 
     # Report suppressed DGs
     suppressed = [k for k, v in _dg_failures.items() if v >= _SUPPRESS_AFTER]
@@ -280,3 +344,36 @@ def run_check(cfg, client=None, tracker=None):
 
     print(f"\nCheck complete: {len(device_groups)} device groups, {total_alerts} new alerts")
     return total_alerts
+
+
+def _save_check_history(data_dir, dg_count, alert_count, dg_results):
+    """Append check result to history file for dashboard consumption."""
+    history_file = data_dir / "logs" / "check_history.json"
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "device_groups": dg_count,
+        "alerts": alert_count,
+        "dg_summary": [
+            {"dg": r["dg"], "pre": r["pre_rules"], "post": r["post_rules"], "alerts": r["alerts"]}
+            for r in dg_results
+        ],
+    }
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Keep last 100 entries
+    history = []
+    if history_file.exists():
+        try:
+            with open(history_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        history.append(line)
+        except Exception:
+            pass
+
+    history.append(json.dumps(entry))
+    history = history[-100:]
+
+    with open(history_file, "w") as f:
+        f.write("\n".join(history) + "\n")
