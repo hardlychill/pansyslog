@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title_suffix %} — {{ name }}{% endblock %}
+{% block content %}
+<h1>{{ name }}</h1>
+<p style="color: var(--text-dim); margin-bottom: 1.5rem;">{{ rules | length }} rules in baseline</p>
+
+{% if rules %}
+<table>
+    <tr>
+        <th>Rule Name</th>
+        <th>From</th>
+        <th>To</th>
+        <th>Application</th>
+        <th>Service</th>
+        <th>Action</th>
+        <th>Status</th>
+    </tr>
+    {% for rule in rules %}
+    <tr>
+        <td class="mono">{{ rule.name }}</td>
+        <td>{{ rule.from | join(', ') }}</td>
+        <td>{{ rule.to | join(', ') }}</td>
+        <td>{{ rule.application | join(', ') }}</td>
+        <td>{{ rule.service | join(', ') }}</td>
+        <td>
+            {% if rule.action in ('deny', 'drop') %}
+                <span class="badge badge-ok">{{ rule.action }}</span>
+            {% else %}
+                <span class="badge badge-medium">{{ rule.action }}</span>
+            {% endif %}
+        </td>
+        <td>
+            {% if rule.disabled %}<span class="badge badge-dim">Disabled</span>{% endif %}
+            {% if not rule.has_security_profile and rule.action not in ('deny', 'drop') %}
+                <span class="badge badge-high">No profile</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">This baseline is empty (0 rules).</div>
+{% endif %}
+
+<div style="margin-top: 1rem;">
+    <a href="/baselines" class="btn btn-ghost btn-sm">Back to Baselines</a>
+</div>
+{% endblock %}

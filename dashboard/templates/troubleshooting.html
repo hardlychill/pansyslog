@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Troubleshooting{% endblock %}
+{% block content %}
+<h1>Troubleshooting</h1>
+
+<div class="actions">
+    <button class="btn btn-primary btn-sm"
+            hx-post="/api/check" hx-swap="none"
+            onclick="setTimeout(() => location.reload(), 5000)">
+        Trigger Check
+    </button>
+    <button class="btn btn-ghost btn-sm"
+            hx-post="/api/reauth" hx-swap="none"
+            onclick="setTimeout(() => location.reload(), 2000)">
+        Force Re-Auth
+    </button>
+</div>
+
+<h1 style="margin-top: 1.5rem;">API Connection</h1>
+<div class="card" style="margin-bottom: 1.5rem;">
+    <table style="background: transparent;">
+        <tr><td style="border: none; color: var(--text-dim); width: 180px;">Panorama Host</td><td style="border: none;" class="mono">{{ health.panorama }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">API Key Valid</td><td style="border: none;">
+            <span class="status-dot {% if health.api_key_valid %}status-ok{% else %}status-err{% endif %}"></span>
+            {% if health.api_key_valid %}Yes{% else %}No — click Force Re-Auth{% endif %}
+        </td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">API Key Obtained</td><td style="border: none;">{{ health.api_key_obtained or 'Never' }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Email Enabled</td><td style="border: none;">{{ 'Yes' if health.email_enabled else 'No' }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Debounce</td><td style="border: none;">{{ health.debounce_seconds }}s</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Re-notification</td><td style="border: none;">{% if health.renotify_hours > 0 %}Every {{ health.renotify_hours }}h{% else %}Disabled{% endif %}</td></tr>
+    </table>
+</div>
+
+{% if health.dg_failing %}
+<h1>Failing Device Groups</h1>
+<p style="color: var(--text-dim); margin-bottom: 1rem;">These DGs have failed recently but are still being retried.</p>
+<table>
+    <tr><th>DG / Rulebase</th><th>Status</th></tr>
+    {% for dg in health.dg_failing %}
+    <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-high">Failing</span></td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if health.dg_suppressed %}
+<h1 style="margin-top: 1.5rem;">Suppressed Device Groups</h1>
+<p style="color: var(--text-dim); margin-bottom: 1rem;">These DGs have failed 3+ times consecutively. Warnings are suppressed. They will be logged as [RECOVERED] when they respond again.</p>
+<table>
+    <tr><th>DG / Rulebase</th><th>Status</th></tr>
+    {% for dg in health.dg_suppressed %}
+    <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-dim">Suppressed</span></td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{% if not health.dg_failing and not health.dg_suppressed %}
+<h1 style="margin-top: 1.5rem;">Device Group Health</h1>
+<div class="empty" style="padding: 1.5rem;">All device groups responding normally.</div>
+{% endif %}
+
+<h1 style="margin-top: 1.5rem;">Quick Reference</h1>
+<div class="card">
+    <table style="background: transparent;">
+        <tr><td style="border: none; color: var(--text-dim); width: 280px;">View container logs</td><td style="border: none;" class="mono">docker logs -f pansyslog</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">View Vector logs</td><td style="border: none;" class="mono">docker logs pansyslog-vector</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">List baselines</td><td style="border: none;" class="mono">docker exec pansyslog ls /data/baselines/</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Check disk space</td><td style="border: none;" class="mono">docker exec pansyslog df -h /data</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Test Panorama API</td><td style="border: none;" class="mono">curl http://localhost:8787/health</td></tr>
+    </table>
+</div>
+{% endblock %}

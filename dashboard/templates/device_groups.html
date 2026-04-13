@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Device Groups{% endblock %}
+{% block content %}
+<h1>Device Groups</h1>
+
+{% if latest_check and latest_check.dg_summary %}
+<table>
+    <tr>
+        <th>Device Group</th>
+        <th>Pre-Rules</th>
+        <th>Post-Rules</th>
+        <th>Alerts (Last Check)</th>
+        <th>Baseline Status</th>
+    </tr>
+    {% for dg in latest_check.dg_summary | sort(attribute='dg') %}
+    <tr>
+        <td class="mono">{{ dg.dg }}</td>
+        <td>
+            {% if dg.pre == 0 %}<span style="color: var(--text-dim)">0</span>
+            {% else %}{{ dg.pre }}{% endif %}
+        </td>
+        <td>
+            {% if dg.post == 0 %}<span style="color: var(--text-dim)">0</span>
+            {% else %}{{ dg.post }}{% endif %}
+        </td>
+        <td>
+            {% if dg.alerts > 0 %}<span class="badge badge-high">{{ dg.alerts }}</span>
+            {% else %}<span class="badge badge-ok">0</span>{% endif %}
+        </td>
+        <td>
+            {% set pre_key = dg.dg ~ '_pre_baseline' %}
+            {% set post_key = dg.dg ~ '_post_baseline' %}
+            {% if pre_key in baselines or post_key in baselines %}
+                <span class="badge badge-ok">Baselined</span>
+            {% else %}
+                <span class="badge badge-dim">No baseline</span>
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No check data available. Trigger a check first.</div>
+{% endif %}
+{% endblock %}

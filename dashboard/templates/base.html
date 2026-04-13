@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pansyslog{% block title_suffix %}{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #242836;
+            --border: #2e3348;
+            --text: #e1e4ed;
+            --text-dim: #8b90a5;
+            --accent: #6c8cff;
+            --green: #4ade80;
+            --yellow: #fbbf24;
+            --red: #f87171;
+            --orange: #fb923c;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg); color: var(--text);
+            display: flex; min-height: 100vh;
+        }
+        nav {
+            width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+            padding: 1rem 0; flex-shrink: 0; position: fixed; height: 100vh; overflow-y: auto;
+        }
+        nav .logo { padding: 0 1rem 1.5rem; font-size: 1.1rem; font-weight: 700; color: var(--accent); }
+        nav a {
+            display: block; padding: 0.6rem 1rem; color: var(--text-dim);
+            text-decoration: none; font-size: 0.9rem; border-left: 3px solid transparent;
+        }
+        nav a:hover { background: var(--surface2); color: var(--text); }
+        nav a.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
+        main { margin-left: 220px; flex: 1; padding: 2rem; max-width: 1200px; }
+        h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 8px; padding: 1.2rem;
+        }
+        .card .label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+        .card .value { font-size: 1.8rem; font-weight: 700; margin-top: 0.3rem; }
+        table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 8px; overflow: hidden; }
+        th { text-align: left; padding: 0.8rem 1rem; background: var(--surface2); color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        td { padding: 0.7rem 1rem; border-top: 1px solid var(--border); font-size: 0.9rem; }
+        tr:hover td { background: var(--surface2); }
+        .badge {
+            display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px;
+            font-size: 0.75rem; font-weight: 600;
+        }
+        .badge-critical { background: rgba(248,113,113,0.15); color: var(--red); }
+        .badge-high { background: rgba(251,146,60,0.15); color: var(--orange); }
+        .badge-medium { background: rgba(251,191,36,0.15); color: var(--yellow); }
+        .badge-ok { background: rgba(74,222,128,0.15); color: var(--green); }
+        .badge-dim { background: var(--surface2); color: var(--text-dim); }
+        .btn {
+            display: inline-block; padding: 0.5rem 1rem; border: none; border-radius: 6px;
+            font-size: 0.85rem; cursor: pointer; font-weight: 500; text-decoration: none;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-danger { background: var(--red); color: #fff; }
+        .btn-danger:hover { opacity: 0.9; }
+        .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+        .btn-ghost:hover { background: var(--border); }
+        .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.78rem; }
+        .actions { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .filter-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        .filter-bar select, .filter-bar input {
+            background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+            border-radius: 6px; padding: 0.4rem 0.7rem; font-size: 0.85rem;
+        }
+        .empty { text-align: center; padding: 3rem; color: var(--text-dim); }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-ok { background: var(--green); }
+        .status-warn { background: var(--yellow); }
+        .status-err { background: var(--red); }
+        .mono { font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.85rem; }
+        .detail-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem; margin-bottom: 1rem; white-space: pre-wrap; font-size: 0.85rem; }
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: inline; }
+        .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--surface2); border: 1px solid var(--border); padding: 0.8rem 1.2rem; border-radius: 8px; font-size: 0.85rem; z-index: 999; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="logo">pansyslog</div>
+        <a href="/" class="{% if page == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="/active-alerts" class="{% if page == 'active_alerts' %}active{% endif %}">Active Alerts</a>
+        <a href="/alert-history" class="{% if page == 'alert_history' %}active{% endif %}">Alert History</a>
+        <a href="/device-groups" class="{% if page == 'device_groups' %}active{% endif %}">Device Groups</a>
+        <a href="/baselines" class="{% if page == 'baselines' %}active{% endif %}">Baselines</a>
+        <a href="/check-history" class="{% if page == 'check_history' %}active{% endif %}">Check History</a>
+        <a href="/troubleshooting" class="{% if page == 'troubleshooting' %}active{% endif %}">Troubleshooting</a>
+    </nav>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        // HTMX toast on action responses
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            if (evt.detail.successful) {
+                let toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = 'Action completed';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+        });
+    </script>
+</body>
+</html>

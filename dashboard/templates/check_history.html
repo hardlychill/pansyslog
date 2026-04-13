@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Check History{% endblock %}
+{% block content %}
+<h1>Check History</h1>
+
+<div class="actions">
+    <button class="btn btn-primary btn-sm"
+            hx-post="/api/check" hx-swap="none"
+            onclick="setTimeout(() => location.reload(), 5000)">
+        Trigger Check Now
+    </button>
+</div>
+
+{% if history %}
+<table>
+    <tr>
+        <th>Time</th>
+        <th>Device Groups</th>
+        <th>Alerts</th>
+        <th>Details</th>
+    </tr>
+    {% for check in history %}
+    <tr>
+        <td style="white-space: nowrap;">{{ check.timestamp[:19] }}</td>
+        <td>{{ check.device_groups }}</td>
+        <td>
+            {% if check.alerts > 0 %}<span class="badge badge-high">{{ check.alerts }}</span>
+            {% else %}<span class="badge badge-ok">0</span>{% endif %}
+        </td>
+        <td>
+            {% if check.dg_summary %}
+                {% set alerted_dgs = check.dg_summary | selectattr('alerts', 'gt', 0) | list %}
+                {% if alerted_dgs %}
+                    {% for dg in alerted_dgs %}{{ dg.dg }} ({{ dg.alerts }}){% if not loop.last %}, {% endif %}{% endfor %}
+                {% else %}
+                    No alerts
+                {% endif %}
+            {% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No checks have run yet.</div>
+{% endif %}
+{% endblock %}

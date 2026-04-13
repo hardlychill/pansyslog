@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Active Alerts{% endblock %}
+{% block content %}
+<h1>Active Alerts</h1>
+
+{% if alerts is mapping and alerts.get('status') == 'disabled' %}
+<div class="empty">
+    Alert tracking is disabled. Set <code>renotify_hours &gt; 0</code> in config.yaml to enable.
+</div>
+{% elif alerts is mapping and alerts | length == 0 %}
+<div class="empty">No unacknowledged alerts.</div>
+{% elif alerts is mapping %}
+<div class="actions">
+    <button class="btn btn-danger btn-sm"
+            hx-post="/api/acknowledge" hx-vals='{"all": true}'
+            hx-confirm="Acknowledge all alerts?"
+            hx-swap="none"
+            onclick="setTimeout(() => location.reload(), 500)">
+        Acknowledge All
+    </button>
+</div>
+
+<table>
+    <tr>
+        <th>Alert Type</th>
+        <th>Device Group</th>
+        <th>Rule</th>
+        <th>First Seen</th>
+        <th>Notifications</th>
+        <th>Action</th>
+    </tr>
+    {% for key, alert in alerts.items() %}
+    <tr>
+        <td>
+            <span class="badge {% if 'CRITICAL' in alert.alert_type %}badge-critical{% elif 'BREAK' in alert.alert_type %}badge-high{% else %}badge-medium{% endif %}">
+                {{ alert.alert_type }}
+            </span>
+        </td>
+        <td class="mono">{{ alert.device_group }}</td>
+        <td class="mono">{{ alert.rule_name }}</td>
+        <td>{{ alert.first_seen }}</td>
+        <td>{{ alert.notify_count }}</td>
+        <td>
+            <button class="btn btn-ghost btn-sm"
+                    hx-post="/api/acknowledge"
+                    hx-vals='{"device_group": "{{ alert.device_group }}", "rule_name": "{{ alert.rule_name }}"}'
+                    hx-swap="none"
+                    onclick="setTimeout(() => location.reload(), 500)">
+                Acknowledge
+            </button>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No unacknowledged alerts.</div>
+{% endif %}
+{% endblock %}

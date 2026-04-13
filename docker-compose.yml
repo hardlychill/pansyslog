@@ -24,10 +24,28 @@ services:
     restart: unless-stopped
     ports:
       - "5514:5514/udp"
-      - "8686:8686"
     volumes:
       - ./configs/vector-docker.yaml:/etc/vector/vector.yaml:ro
       - pansyslog-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  dashboard:
+    build: ./dashboard
+    container_name: pansyslog-dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - pansyslog-data:/data:ro
+    environment:
+      - PANSYSLOG_API=http://pansyslog:8787
+      - DATA_DIR=/data
+    depends_on:
+      - pansyslog
     logging:
       driver: json-file
       options:

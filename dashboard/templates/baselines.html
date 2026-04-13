@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Baselines{% endblock %}
+{% block content %}
+<h1>Baselines</h1>
+
+<div class="actions">
+    <button class="btn btn-danger btn-sm"
+            hx-post="/api/baseline/reset" hx-vals='{"all": true}'
+            hx-confirm="Reset ALL baselines? This will trigger a re-check."
+            hx-swap="none"
+            onclick="setTimeout(() => location.reload(), 2000)">
+        Reset All Baselines
+    </button>
+</div>
+
+{% if baselines %}
+<table>
+    <tr>
+        <th>Baseline</th>
+        <th>Rules</th>
+        <th>Last Updated</th>
+        <th>Actions</th>
+    </tr>
+    {% for name, info in baselines.items() | sort %}
+    <tr>
+        <td>
+            <a href="/baselines/{{ name }}" style="color: var(--accent); text-decoration: none;">{{ name }}</a>
+        </td>
+        <td>
+            {% if info.rule_count == 0 %}<span style="color: var(--text-dim)">0 (empty)</span>
+            {% else %}{{ info.rule_count }}{% endif %}
+        </td>
+        <td>{{ info.modified[:19] }}</td>
+        <td>
+            {% set dg_name = name.replace('_pre_baseline', '').replace('_post_baseline', '') %}
+            <button class="btn btn-ghost btn-sm"
+                    hx-post="/api/baseline/reset"
+                    hx-vals='{"device_group": "{{ dg_name }}"}'
+                    hx-confirm="Reset baselines for {{ dg_name }}?"
+                    hx-swap="none"
+                    onclick="setTimeout(() => location.reload(), 2000)">
+                Reset
+            </button>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No baselines exist yet. Trigger a check to create them.</div>
+{% endif %}
+{% endblock %}

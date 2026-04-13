@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Alert History{% endblock %}
+{% block content %}
+<h1>Alert History</h1>
+
+<div class="actions">
+    <a href="/api/alerts/export" class="btn btn-ghost btn-sm">Export CSV</a>
+</div>
+
+<div class="filter-bar">
+    <select id="filter-type" onchange="filterAlerts()">
+        <option value="">All Types</option>
+        <option value="CRITICAL_SEGMENTATION_REMOTE_ACCESS">Critical: Seg + RA</option>
+        <option value="CRITICAL_SEGMENTATION_FILE_SHARING">Critical: Seg + FS</option>
+        <option value="BREAK_OF_SEGMENTATION">Break of Segmentation</option>
+        <option value="REMOTE_ACCESS_RULE">Remote Access</option>
+        <option value="FILE_SHARING_RULE">File Sharing</option>
+        <option value="BASELINE_ANOMALY">Baseline Anomaly</option>
+    </select>
+    <input type="text" id="filter-dg" placeholder="Filter by device group..." oninput="filterAlerts()">
+    <input type="text" id="filter-admin" placeholder="Filter by admin..." oninput="filterAlerts()">
+</div>
+
+{% if alerts %}
+<table id="alert-table">
+    <tr>
+        <th>Time</th>
+        <th>Type</th>
+        <th>Device Group</th>
+        <th>Rule</th>
+        <th>Changed By</th>
+        <th>Details</th>
+    </tr>
+    {% for alert in alerts | reverse %}
+    <tr data-type="{{ alert.alert_type }}" data-dg="{{ alert.device_group | default('') | lower }}" data-admin="{{ alert.changed_by | default('') | lower }}">
+        <td style="white-space: nowrap;">{{ alert.timestamp[:19] }}</td>
+        <td>
+            <span class="badge {% if 'CRITICAL' in alert.alert_type %}badge-critical{% elif 'BREAK' in alert.alert_type or 'ANOMALY' in alert.alert_type %}badge-high{% else %}badge-medium{% endif %}">
+                {{ alert.alert_type }}
+            </span>
+        </td>
+        <td class="mono">{{ alert.device_group | default('—') }}</td>
+        <td class="mono">{{ alert.rule_name }}</td>
+        <td>{{ alert.changed_by | default('unknown') }}</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ alert.details }}">{{ alert.details }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No alerts recorded yet.</div>
+{% endif %}
+
+<script>
+function filterAlerts() {
+    const type = document.getElementById('filter-type').value;
+    const dg = document.getElementById('filter-dg').value.toLowerCase();
+    const admin = document.getElementById('filter-admin').value.toLowerCase();
+    document.querySelectorAll('#alert-table tr[data-type]').forEach(row => {
+        const matchType = !type || row.dataset.type.includes(type);
+        const matchDg = !dg || row.dataset.dg.includes(dg);
+        const matchAdmin = !admin || row.dataset.admin.includes(admin);
+        row.style.display = (matchType && matchDg && matchAdmin) ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}
