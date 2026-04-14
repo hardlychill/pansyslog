@@ -42,7 +42,7 @@
                     <input type="number" name="debounce_seconds" value="{{ settings.get('debounce_seconds', 30) }}" min="5" max="300"
                            style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 100px; font-size: 0.9rem;">
                     <span style="color: var(--text-dim); margin-left: 0.5rem;">seconds</span>
-                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Cooldown between check cycles after syslog events.</div>
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Cooldown between check cycles. Events during the window are not dropped — a deferred check fires when the window expires, catching all changes since the last check.</div>
                 </td>
             </tr>
             <tr>
