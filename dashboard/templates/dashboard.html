@@ -3,33 +3,40 @@
 {% block content %}
 <h1>Dashboard</h1>
 
+{% if not health or not health.get('status') %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <span class="status-dot status-err"></span>
+    <strong>Cannot reach pansyslog engine</strong> — monitoring API at {{ health }} is not responding.
+</div>
+{% endif %}
+
 <div class="cards">
     <div class="card">
         <div class="label">Status</div>
         <div class="value">
-            <span class="status-dot {% if health.status == 'ok' %}status-ok{% elif health.status == 'checking' %}status-warn{% else %}status-err{% endif %}"></span>
-            {{ health.status | upper }}
+            <span class="status-dot {% if health.get('status') == 'ok' %}status-ok{% elif health.get('status') == 'checking' %}status-warn{% else %}status-err{% endif %}"></span>
+            {{ health.get('status', 'OFFLINE') | upper }}
         </div>
     </div>
     <div class="card">
         <div class="label">Uptime</div>
-        <div class="value">{{ (health.uptime_seconds // 3600) }}h {{ ((health.uptime_seconds % 3600) // 60) }}m</div>
+        <div class="value">{{ (health.get('uptime_seconds', 0) // 3600) }}h {{ ((health.get('uptime_seconds', 0) % 3600) // 60) }}m</div>
     </div>
     <div class="card">
         <div class="label">Total Checks</div>
-        <div class="value">{{ health.total_checks }}</div>
+        <div class="value">{{ health.get('total_checks', 0) }}</div>
     </div>
     <div class="card">
         <div class="label">Total Alerts</div>
-        <div class="value" style="color: {% if health.total_alerts > 0 %}var(--red){% else %}var(--green){% endif %}">{{ health.total_alerts }}</div>
+        <div class="value" style="color: {% if health.get('total_alerts', 0) > 0 %}var(--red){% else %}var(--green){% endif %}">{{ health.get('total_alerts', 0) }}</div>
     </div>
     <div class="card">
         <div class="label">Unacknowledged</div>
-        <div class="value">{{ health.unacknowledged_alerts }}</div>
+        <div class="value">{{ health.get('unacknowledged_alerts', '—') }}</div>
     </div>
     <div class="card">
         <div class="label">Last Check</div>
-        <div class="value" style="font-size: 1rem;">{{ health.last_check or 'Never' }}</div>
+        <div class="value" style="font-size: 1rem;">{{ health.get('last_check') or 'Never' }}</div>
     </div>
 </div>
 
@@ -37,43 +44,43 @@
 <div class="cards">
     <div class="card">
         <div class="label">Panorama</div>
-        <div class="value mono" style="font-size: 1.1rem;">{{ health.panorama }}</div>
+        <div class="value mono" style="font-size: 1.1rem;">{{ health.get('panorama', '—') }}</div>
     </div>
     <div class="card">
         <div class="label">API Key</div>
         <div class="value">
-            <span class="status-dot {% if health.api_key_valid %}status-ok{% else %}status-err{% endif %}"></span>
-            {% if health.api_key_valid %}Valid{% else %}Invalid{% endif %}
+            <span class="status-dot {% if health.get('api_key_valid') %}status-ok{% else %}status-err{% endif %}"></span>
+            {% if health.get('api_key_valid') %}Valid{% else %}Invalid{% endif %}
         </div>
     </div>
     <div class="card">
         <div class="label">Email Alerts</div>
         <div class="value">
-            <span class="status-dot {% if health.email_enabled %}status-ok{% else %}status-warn{% endif %}"></span>
-            {% if health.email_enabled %}Enabled{% else %}Disabled{% endif %}
+            <span class="status-dot {% if health.get('email_enabled') %}status-ok{% else %}status-warn{% endif %}"></span>
+            {% if health.get('email_enabled') %}Enabled{% else %}Disabled{% endif %}
         </div>
     </div>
     <div class="card">
         <div class="label">Debounce</div>
-        <div class="value">{{ health.debounce_seconds }}s</div>
+        <div class="value">{{ health.get('debounce_seconds', '—') }}s</div>
     </div>
 </div>
 
-{% if health.dg_failing %}
+{% if health.get('dg_failing') %}
 <h1>Failing Device Groups</h1>
 <table>
     <tr><th>Device Group / Rulebase</th><th>Status</th></tr>
-    {% for dg in health.dg_failing %}
+    {% for dg in health.get('dg_failing', []) %}
     <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-high">Failing</span></td></tr>
     {% endfor %}
 </table>
 {% endif %}
 
-{% if health.dg_suppressed %}
+{% if health.get('dg_suppressed') %}
 <h1 style="margin-top: 1.5rem;">Suppressed Device Groups</h1>
 <table>
     <tr><th>Device Group / Rulebase</th><th>Status</th></tr>
-    {% for dg in health.dg_suppressed %}
+    {% for dg in health.get('dg_suppressed', []) %}
     <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-dim">Suppressed</span></td></tr>
     {% endfor %}
 </table>

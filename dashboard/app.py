@@ -15,69 +15,80 @@ PANSYSLOG_API = os.environ.get("PANSYSLOG_API", "http://pansyslog:8787")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 
 app = FastAPI(title="pansyslog dashboard")
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
+
+_dir = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(_dir))
+# Disable Jinja2 cache to avoid Python 3.14 compatibility issues
+templates.env.auto_reload = True
+templates.env.cache = None
 
 
 # --- Proxy helpers ---
 
 async def api_get(path):
-    """GET from pansyslog API."""
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(f"{PANSYSLOG_API}{path}")
-        return resp.json()
+    """GET from pansyslog API. Returns empty dict/list on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{PANSYSLOG_API}{path}")
+            return resp.json()
+    except Exception:
+        return {}
 
 
 async def api_post(path, data=None):
-    """POST to pansyslog API."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(f"{PANSYSLOG_API}{path}", json=data or {})
-        return resp.json()
+    """POST to pansyslog API. Returns error dict on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(f"{PANSYSLOG_API}{path}", json=data or {})
+            return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # --- Pages ---
 
+def _render(request, name, ctx):
+    """Render template — compatible with both old and new Starlette API."""
+    return templates.TemplateResponse(request, name, ctx)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     health = await api_get("/health")
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "health": health, "page": "dashboard",
-    })
+    return _render(request, "dashboard.html", {"health": health, "page": "dashboard"})
 
 
 @app.get("/active-alerts", response_class=HTMLResponse)
 async def active_alerts_page(request: Request):
     alerts = await api_get("/active-alerts")
-    return templates.TemplateResponse("active_alerts.html", {
-        "request": request, "alerts": alerts, "page": "active_alerts",
-    })
+    return _render(request, "active_alerts.html", {"alerts": alerts, "page": "active_alerts"})
 
 
 @app.get("/alert-history", response_class=HTMLResponse)
 async def alert_history_page(request: Request):
     alerts = await api_get("/alerts")
-    return templates.TemplateResponse("alert_history.html", {
-        "request": request, "alerts": alerts, "page": "alert_history",
-    })
+    if not isinstance(alerts, list):
+        alerts = []
+    return _render(request, "alert_history.html", {"alerts": alerts, "page": "alert_history"})
 
 
 @app.get("/device-groups", response_class=HTMLResponse)
 async def device_groups_page(request: Request):
     baselines = await api_get("/baselines")
     check_history = await api_get("/check-history")
+    if not isinstance(check_history, list):
+        check_history = []
     latest = check_history[-1] if check_history else None
-    return templates.TemplateResponse("device_groups.html", {
-        "request": request, "baselines": baselines, "latest_check": latest,
-        "page": "device_groups",
+    return _render(request, "device_groups.html", {
+        "baselines": baselines, "latest_check": latest, "page": "device_groups",
     })
 
 
 @app.get("/baselines", response_class=HTMLResponse)
 async def baselines_page(request: Request):
     baselines = await api_get("/baselines")
-    return templates.TemplateResponse("baselines.html", {
-        "request": request, "baselines": baselines, "page": "baselines",
-    })
+    return _render(request, "baselines.html", {"baselines": baselines, "page": "baselines"})
 
 
 @app.get("/baselines/{name}", response_class=HTMLResponse)
@@ -87,26 +98,24 @@ async def baseline_detail(request: Request, name: str):
     if baseline_file.exists():
         with open(baseline_file) as f:
             rules = json.load(f)
-    return templates.TemplateResponse("baseline_detail.html", {
-        "request": request, "name": name, "rules": rules, "page": "baselines",
+    return _render(request, "baseline_detail.html", {
+        "name": name, "rules": rules, "page": "baselines",
     })
 
 
 @app.get("/check-history", response_class=HTMLResponse)
 async def check_history_page(request: Request):
     history = await api_get("/check-history")
-    history.reverse()  # newest first
-    return templates.TemplateResponse("check_history.html", {
-        "request": request, "history": history, "page": "check_history",
-    })
+    if not isinstance(history, list):
+        history = []
+    history.reverse()
+    return _render(request, "check_history.html", {"history": history, "page": "check_history"})
 
 
 @app.get("/troubleshooting", response_class=HTMLResponse)
 async def troubleshooting_page(request: Request):
     health = await api_get("/health")
-    return templates.TemplateResponse("troubleshooting.html", {
-        "request": request, "health": health, "page": "troubleshooting",
-    })
+    return _render(request, "troubleshooting.html", {"health": health, "page": "troubleshooting"})
 
 
 # --- API actions (proxied to pansyslog) ---

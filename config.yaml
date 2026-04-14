@@ -49,7 +49,8 @@ renotify_hours: 0  # re-email unacknowledged alerts every N hours (0 to disable)
 
 email:
   enabled: true
-  to: alerts@example.com
+  to: alerts@example.com           # firewall alert recipient
+  system_to: ""                    # system alert recipient (empty = don't email system alerts)
   smtp_host: smtp.gmail.com
   smtp_port: 587
   # Set via env vars SMTP_USER and SMTP_PASS (don't commit credentials)

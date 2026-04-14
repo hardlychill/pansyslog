@@ -19,41 +19,41 @@
 <h1 style="margin-top: 1.5rem;">API Connection</h1>
 <div class="card" style="margin-bottom: 1.5rem;">
     <table style="background: transparent;">
-        <tr><td style="border: none; color: var(--text-dim); width: 180px;">Panorama Host</td><td style="border: none;" class="mono">{{ health.panorama }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim); width: 180px;">Panorama Host</td><td style="border: none;" class="mono">{{ health.get('panorama', '—') }}</td></tr>
         <tr><td style="border: none; color: var(--text-dim);">API Key Valid</td><td style="border: none;">
-            <span class="status-dot {% if health.api_key_valid %}status-ok{% else %}status-err{% endif %}"></span>
-            {% if health.api_key_valid %}Yes{% else %}No — click Force Re-Auth{% endif %}
+            <span class="status-dot {% if health.get('api_key_valid') %}status-ok{% else %}status-err{% endif %}"></span>
+            {% if health.get('api_key_valid') %}Yes{% else %}No — click Force Re-Auth{% endif %}
         </td></tr>
-        <tr><td style="border: none; color: var(--text-dim);">API Key Obtained</td><td style="border: none;">{{ health.api_key_obtained or 'Never' }}</td></tr>
-        <tr><td style="border: none; color: var(--text-dim);">Email Enabled</td><td style="border: none;">{{ 'Yes' if health.email_enabled else 'No' }}</td></tr>
-        <tr><td style="border: none; color: var(--text-dim);">Debounce</td><td style="border: none;">{{ health.debounce_seconds }}s</td></tr>
-        <tr><td style="border: none; color: var(--text-dim);">Re-notification</td><td style="border: none;">{% if health.renotify_hours > 0 %}Every {{ health.renotify_hours }}h{% else %}Disabled{% endif %}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">API Key Obtained</td><td style="border: none;">{{ health.get('api_key_obtained') or 'Never' }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Email Enabled</td><td style="border: none;">{{ 'Yes' if health.get('email_enabled') else 'No' }}</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Debounce</td><td style="border: none;">{{ health.get('debounce_seconds', '—') }}s</td></tr>
+        <tr><td style="border: none; color: var(--text-dim);">Re-notification</td><td style="border: none;">{% if health.get('renotify_hours', 0) > 0 %}Every {{ health.get('renotify_hours', 0) }}h{% else %}Disabled{% endif %}</td></tr>
     </table>
 </div>
 
-{% if health.dg_failing %}
+{% if health.get('dg_failing') %}
 <h1>Failing Device Groups</h1>
 <p style="color: var(--text-dim); margin-bottom: 1rem;">These DGs have failed recently but are still being retried.</p>
 <table>
     <tr><th>DG / Rulebase</th><th>Status</th></tr>
-    {% for dg in health.dg_failing %}
+    {% for dg in health.get('dg_failing') %}
     <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-high">Failing</span></td></tr>
     {% endfor %}
 </table>
 {% endif %}
 
-{% if health.dg_suppressed %}
+{% if health.get('dg_suppressed') %}
 <h1 style="margin-top: 1.5rem;">Suppressed Device Groups</h1>
 <p style="color: var(--text-dim); margin-bottom: 1rem;">These DGs have failed 3+ times consecutively. Warnings are suppressed. They will be logged as [RECOVERED] when they respond again.</p>
 <table>
     <tr><th>DG / Rulebase</th><th>Status</th></tr>
-    {% for dg in health.dg_suppressed %}
+    {% for dg in health.get('dg_suppressed') %}
     <tr><td class="mono">{{ dg }}</td><td><span class="badge badge-dim">Suppressed</span></td></tr>
     {% endfor %}
 </table>
 {% endif %}
 
-{% if not health.dg_failing and not health.dg_suppressed %}
+{% if not health.get('dg_failing') and not health.get('dg_suppressed') %}
 <h1 style="margin-top: 1.5rem;">Device Group Health</h1>
 <div class="empty" style="padding: 1.5rem;">All device groups responding normally.</div>
 {% endif %}

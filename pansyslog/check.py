@@ -22,13 +22,18 @@ _SUPPRESS_AFTER = 3  # suppress warnings after this many consecutive failures
 _alert_log_lock = threading.Lock()
 
 
+SYSTEM_ALERT_TYPES = {"BASELINE_ANOMALY_PRE", "BASELINE_ANOMALY_POST"}
+
+
 def log_alert(alert_log, alert_type, rule, details, commit_ctx, device_group,
               tracker=None):
     """Write a single alert entry to the JSONL alert log."""
     ctx = commit_ctx or {}
+    category = "system" if alert_type in SYSTEM_ALERT_TYPES else "firewall"
     alert = {
         "timestamp": datetime.now().isoformat(),
         "alert_type": alert_type,
+        "category": category,
         "device_group": device_group,
         "rule_name": rule.get("name", rule.get("new", {}).get("name", "unknown")),
         "details": details,

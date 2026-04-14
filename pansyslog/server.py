@@ -149,7 +149,7 @@ class WebhookServer:
         print(f"[ROTATE] Trimmed alerts.json from {len(lines)} to {max_entries} entries")
 
     def _send_alert_email(self, alert_count_before, new_count):
-        """Read new alert entries and send summary email."""
+        """Read new alert entries and send summary email. Only emails firewall alerts."""
         if not self.alert_log.exists():
             return
 
@@ -157,10 +157,11 @@ class WebhookServer:
             lines = f.readlines()
 
         new_alerts = lines[-new_count:]
-        alert_details = []
+        fw_details = []
+        sys_details = []
         for line in new_alerts:
             alert = json.loads(line.strip())
-            alert_details.append(
+            detail = (
                 f"Type: {alert['alert_type']}\n"
                 f"Device Group: {alert.get('device_group', 'unknown')}\n"
                 f"Rule: {alert['rule_name']}\n"
@@ -172,17 +173,43 @@ class WebhookServer:
                 f"Details: {alert['details']}\n"
                 f"Alert time: {alert['timestamp']}"
             )
+            if alert.get("category") == "system":
+                sys_details.append(detail)
+            else:
+                fw_details.append(detail)
 
         host = self.cfg["panorama"]["host"]
-        body = (
-            f"pansyslog detected {new_count} insecure rule change(s) on Panorama ({host}):\n\n"
-            + "\n---\n".join(alert_details)
-        )
-        send_email(
-            self.cfg,
-            f"[pansyslog] {new_count} insecure rule change(s) detected",
-            body,
-        )
+
+        # Email firewall alerts to main recipient
+        if fw_details:
+            body = (
+                f"pansyslog detected {len(fw_details)} insecure rule change(s) on Panorama ({host}):\n\n"
+                + "\n---\n".join(fw_details)
+            )
+            send_email(
+                self.cfg,
+                f"[pansyslog] {len(fw_details)} insecure rule change(s) detected",
+                body,
+            )
+
+        # Email system alerts to system_to recipient (if configured)
+        system_to = self.cfg["email"].get("system_to", "")
+        if sys_details and system_to:
+            body = (
+                f"pansyslog system alert(s) on Panorama ({host}):\n\n"
+                + "\n---\n".join(sys_details)
+            )
+            # Override recipient for system alerts
+            sys_cfg = dict(self.cfg)
+            sys_cfg["email"] = dict(self.cfg["email"])
+            sys_cfg["email"]["to"] = system_to
+            send_email(
+                sys_cfg,
+                f"[pansyslog] {len(sys_details)} system alert(s)",
+                body,
+            )
+        elif sys_details:
+            print(f"[EMAIL] {len(sys_details)} system alert(s) not emailed — no system_to configured")
 
     def _get_health(self):
         """Build health status dict."""
