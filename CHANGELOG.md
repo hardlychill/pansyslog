@@ -1,5 +1,85 @@
 # Changelog
 
+## 2026-04-13 — Dashboard, Baseline Protection, and Settings
+
+### New Features
+
+- **Web dashboard** — New `pansyslog-dashboard` container on port 8080 with full management UI:
+  - **Dashboard** — System health, API key status, check stats, failing/suppressed DGs
+  - **Active Alerts** — Acknowledge per-alert, per-DG, or all with one click
+  - **Alert History** — Searchable/filterable by type, device group, admin. CSV export.
+  - **Device Groups** — Rule counts (pre/post), baseline status per DG
+  - **Baselines** — Browse rules per DG, highlight dangerous rules (no security profile, allow action). Reset per-DG or all with immediate re-check.
+  - **Check History** — Timeline of checks with alert counts, manual trigger button
+  - **Troubleshooting** — API key status, force re-auth, manual check, quick reference commands
+  - **Settings** — Runtime-configurable settings with audit logging (see below)
+
+- **Runtime settings via dashboard** — Email recipients, re-notification interval, debounce window, and parallel workers can be changed from the Settings page without restarting. All changes are logged to `/data/logs/config_changes.json` with timestamps. Panorama credentials, alert zones, and SMTP server settings remain file-only.
+
+- **Baseline protection (BASELINE_ANOMALY)** — When the Panorama API returns 0 rules for a device group that previously had a populated baseline, pansyslog refuses to overwrite the baseline and fires a `BASELINE_ANOMALY` alert. Prevents data loss from transient API errors.
+
+- **First-run summary** — On initial baseline creation, logs a breakdown of empty vs populated rulebases (pre/post) so the admin can verify which DGs are legitimately empty.
+
+- **Check history persistence** — Check results (timestamp, DG count, alert count, per-DG summary) saved to `/data/logs/check_history.json` (last 100 entries). Viewable from the dashboard.
+
+- **Separate email routing for system vs firewall alerts** — Firewall rule change alerts go to `email.to` (on-call). System alerts (baseline anomalies) go to `email.system_to` (admin/engineering). If `system_to` is empty, system alerts are logged but not emailed. On-call never gets spammed with system noise.
+
+### New API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/settings` | GET | Current mutable settings |
+| `/settings` | POST | Update settings at runtime |
+| `/config-changes` | GET | Audit log of settings changes |
+| `/check-history` | GET | Recent check results |
+| `/alerts` | GET | Full alert history |
+| `/baselines` | GET | All baselines with rule counts |
+| `/baseline/reset` | POST | Reset per-DG or all baselines |
+| `/reauth` | POST | Force API key refresh |
+
+### Config Changes
+
+New field in `config.yaml`:
+
+```yaml
+email:
+  system_to: ""   # system alert recipient (empty = don't email system alerts)
+```
+
+### Data Changes
+
+New files in `/data/logs/`:
+- `check_history.json` — JSONL, last 100 check results
+- `config_changes.json` — JSONL, audit log of runtime settings changes
+
+### Docker Changes
+
+New container in `docker-compose.yml`:
+
+```yaml
+dashboard:
+  build: ./dashboard
+  ports:
+    - "8080:8080"
+  volumes:
+    - pansyslog-data:/data:ro
+  environment:
+    - PANSYSLOG_API=http://pansyslog:8787
+```
+
+Vector GraphQL port (8686) removed from compose — was unnecessary exposure.
+
+### Upgrade Instructions
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Dashboard is available at `http://<docker-host>:8080`. No config changes required — new fields have safe defaults.
+
+---
+
 ## 2026-04-10 — Alert Classification Improvements
 
 ### New Features

@@ -4,9 +4,10 @@ Instructions for building, deploying, and operating pansyslog in production.
 
 ## Overview
 
-pansyslog is a Docker Compose stack with two containers:
-- **pansyslog** — Python webhook server that monitors Panorama for insecure rule changes
-- **vector** — Syslog receiver that filters and forwards config-change events
+pansyslog is a Docker Compose stack with three containers:
+- **pansyslog** — Python webhook server that monitors Panorama for insecure rule changes (port 8787)
+- **vector** — Syslog receiver that filters and forwards config-change events (port 5514/udp)
+- **dashboard** — Web UI for alert management, baseline browsing, and settings (port 8080)
 
 ## Requirements
 
@@ -43,8 +44,9 @@ alert_zones:
 
 email:
   enabled: true
-  to: security-alerts@yourorg.com
-  smtp_host: mail-relay.internal  # Internal relay (no auth needed)
+  to: security-alerts@yourorg.com   # firewall alerts (on-call)
+  system_to: admin@yourorg.com      # system alerts (empty = don't email)
+  smtp_host: mail-relay.internal    # Internal relay (no auth needed)
   smtp_port: 25
 
 debounce_seconds: 30
@@ -93,11 +95,21 @@ Expected output:
 [pansyslog] Webhook server starting on port 8787
 [pansyslog] Panorama: 10.0.0.1
 [pansyslog] Device groups: all (auto-enumerate)
-[pansyslog] Endpoints: POST / (webhook), POST /check (manual), POST /acknowledge, GET /health, GET /active-alerts
+[pansyslog] Endpoints: POST /(webhook) /check /acknowledge /baseline/reset /reauth /settings | GET /health /active-alerts /check-history /alerts /baselines /settings /config-changes
 [pansyslog] Alerts will be sent to security-alerts@yourorg.com
 ```
 
-### 6. Configure Panorama syslog
+### 6. Access the dashboard
+
+Open `http://<deployment-host>:8080` in a browser. The dashboard provides:
+- Alert management (acknowledge, history, filtering, CSV export)
+- Baseline browsing and reset
+- Device group overview
+- Check history and manual trigger
+- Runtime settings with audit logging
+- Troubleshooting tools (re-auth, API status)
+
+### 7. Configure Panorama syslog
 
 Follow [panorama-syslog-setup.md](panorama-syslog-setup.md) to point Panorama config logs at `<deployment-host>:5514 UDP`.
 
@@ -125,6 +137,14 @@ You should see `<DG-name>_pre_baseline.json` and `<DG-name>_post_baseline.json` 
 | `/health` | GET | Status, uptime, API key, stats, failing DGs |
 | `/active-alerts` | GET | List all unacknowledged alerts |
 | `/acknowledge` | POST | Acknowledge alerts to stop re-notifications |
+| `/alerts` | GET | Full alert history from alerts.json |
+| `/check-history` | GET | Recent check results with DG summaries |
+| `/baselines` | GET | All baselines with rule counts and modified times |
+| `/baseline/reset` | POST | Reset baselines per-DG or all, triggers re-check |
+| `/reauth` | POST | Force API key refresh |
+| `/settings` | GET | Current runtime-configurable settings |
+| `/settings` | POST | Update runtime settings (logged to audit trail) |
+| `/config-changes` | GET | Audit log of all settings changes |
 
 ### Health check
 
@@ -151,7 +171,31 @@ curl -X POST http://localhost:8787/acknowledge \
 curl -X POST http://localhost:8787/acknowledge -d '{"all":true}'
 ```
 
-**Note:** Alert tracking and re-notification is disabled by default (`renotify_hours: 0`). When disabled, `/acknowledge` and `/active-alerts` return `{"status": "disabled"}`. Set `renotify_hours: 24` in config.yaml and restart to enable. When enabled, unacknowledged alerts trigger reminder emails at the configured interval, and acknowledging stops the reminders. Alerts auto-resolve if the offending rule is removed from the rulebase.
+**Note:** Alert tracking and re-notification is disabled by default (`renotify_hours: 0`). When disabled, `/acknowledge` and `/active-alerts` return `{"status": "disabled"}`. Enable via the Settings page in the dashboard or set `renotify_hours: 24` in config.yaml. When enabled, unacknowledged alerts trigger reminder emails at the configured interval, and acknowledging stops the reminders. Alerts auto-resolve if the offending rule is removed from the rulebase.
+
+### Runtime settings
+
+Settings can be changed from the dashboard Settings page or via API. Changes take effect immediately without restart and are audit-logged.
+
+```bash
+# View current settings
+curl http://localhost:8787/settings
+
+# Update settings
+curl -X POST http://localhost:8787/settings \
+  -d '{"email_to":"newemail@example.com","debounce_seconds":15}'
+
+# View change history
+curl http://localhost:8787/config-changes
+```
+
+Mutable settings: `email_to`, `email_system_to`, `renotify_hours`, `debounce_seconds`, `max_workers`.
+
+Immutable settings (require config.yaml edit + restart): Panorama credentials, alert zones, remote access ports, SMTP server.
+
+### Email routing
+
+Firewall alerts (rule changes) are emailed to `email.to`. System alerts (baseline anomalies) are emailed to `email.system_to`. If `system_to` is empty, system alerts are logged and visible on the dashboard but not emailed. This prevents on-call from receiving non-actionable system noise.
 
 ## Operations
 
@@ -226,10 +270,13 @@ The Docker volume `pansyslog-data` stores baselines, alert logs, active alert tr
 ├── baselines/
 │   ├── <DG>_pre_baseline.json
 │   ├── <DG>_post_baseline.json
-│   └── remote_access_apps.json    # 24h cache
+│   ├── remote_access_apps.json    # 24h cache
+│   └── file-sharing_apps.json     # 24h cache
 └── logs/
     ├── alerts.json                # Alert history (JSONL, capped at 1000)
-    └── active_alerts.json         # Unacknowledged alert tracker
+    ├── active_alerts.json         # Unacknowledged alert tracker
+    ├── check_history.json         # Check results (JSONL, last 100)
+    └── config_changes.json        # Settings change audit log (JSONL)
 ```
 
 To back up:

@@ -100,16 +100,22 @@ pansyslog/
 ├── requirements.txt
 ├── configs/
 │   └── vector-docker.yaml
-└── pansyslog/                 # Python package
-    ├── __init__.py
-    ├── __main__.py            # Entry point
-    ├── config.py              # Config loader (YAML + env vars)
-    ├── api.py                 # Panorama XML API client
-    ├── diff.py                # Rule parsing + baseline diffing
-    ├── alerts.py              # Alert classification logic
-    ├── email_alert.py         # SMTP alerting
-    ├── check.py               # Per-device-group check orchestration
-    └── server.py              # Webhook server with debounce
+├── pansyslog/                 # Monitoring engine
+│   ├── __init__.py
+│   ├── __main__.py            # Entry point
+│   ├── config.py              # Config loader (YAML + env vars)
+│   ├── api.py                 # Panorama XML API client
+│   ├── diff.py                # Rule parsing + baseline diffing
+│   ├── alerts.py              # Alert classification logic
+│   ├── email_alert.py         # SMTP alerting
+│   ├── check.py               # Per-device-group check orchestration
+│   ├── server.py              # Webhook server with debounce
+│   └── tracker.py             # Unacknowledged alert tracker
+└── dashboard/                 # Web UI (separate container)
+    ├── Dockerfile
+    ├── requirements.txt
+    ├── app.py                 # FastAPI backend
+    └── templates/             # Jinja2 HTML templates
 ```
 
 ## Documentation
