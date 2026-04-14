@@ -12,6 +12,15 @@ from .check import run_check, _dg_failures
 from .email_alert import send_email
 from .tracker import AlertTracker
 
+# Settings that can be changed at runtime via API
+MUTABLE_SETTINGS = {
+    "email_to":        {"path": ("email", "to"),         "type": str},
+    "email_system_to": {"path": ("email", "system_to"),  "type": str},
+    "renotify_hours":  {"path": ("renotify_hours",),     "type": int},
+    "debounce_seconds":{"path": ("debounce_seconds",),   "type": int},
+    "max_workers":     {"path": ("max_workers",),        "type": int},
+}
+
 
 class WebhookServer:
     """Webhook listener with trailing-edge debounce, health and manual trigger endpoints."""
@@ -211,6 +220,27 @@ class WebhookServer:
         elif sys_details:
             print(f"[EMAIL] {len(sys_details)} system alert(s) not emailed — no system_to configured")
 
+    def _get_settings(self):
+        """Return current mutable settings."""
+        result = {}
+        for key, spec in MUTABLE_SETTINGS.items():
+            obj = self.cfg
+            for p in spec["path"]:
+                obj = obj.get(p, {}) if isinstance(obj, dict) else {}
+            result[key] = obj
+        return result
+
+    def _log_config_change(self, changes):
+        """Append config change to audit log."""
+        log_file = self.data_dir / "logs" / "config_changes.json"
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "changes": changes,
+        }
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
     def _get_health(self):
         """Build health status dict."""
         suppressed = [k for k, v in _dg_failures.items() if v >= 3]
@@ -334,6 +364,71 @@ class WebhookServer:
                     except Exception as e:
                         self._json_response(500, {"error": str(e)})
 
+                elif path == "/settings":
+                    try:
+                        body = json.loads(raw.decode()) if raw else {}
+                    except json.JSONDecodeError:
+                        self._json_response(400, {"error": "invalid JSON"})
+                        return
+
+                    changes = []
+                    for key, value in body.items():
+                        if key not in MUTABLE_SETTINGS:
+                            self._json_response(400, {"error": f"unknown or immutable setting: {key}"})
+                            return
+                        spec = MUTABLE_SETTINGS[key]
+                        try:
+                            value = spec["type"](value)
+                        except (ValueError, TypeError):
+                            self._json_response(400, {"error": f"invalid type for {key}, expected {spec['type'].__name__}"})
+                            return
+
+                        # Get old value
+                        obj = server_ref.cfg
+                        for p in spec["path"][:-1]:
+                            obj = obj.get(p, {})
+                        old_value = obj.get(spec["path"][-1])
+
+                        if old_value == value:
+                            continue
+
+                        # Set new value
+                        obj = server_ref.cfg
+                        for p in spec["path"][:-1]:
+                            obj = obj.setdefault(p, {})
+                        obj[spec["path"][-1]] = value
+
+                        changes.append({
+                            "setting": key,
+                            "old_value": old_value,
+                            "new_value": value,
+                        })
+
+                    # Apply side effects
+                    for change in changes:
+                        k = change["setting"]
+                        if k == "debounce_seconds":
+                            server_ref.debounce_seconds = change["new_value"]
+                        elif k == "renotify_hours":
+                            # Restart tracker if toggled
+                            hrs = change["new_value"]
+                            if hrs > 0 and not server_ref.tracker:
+                                server_ref.tracker = AlertTracker(
+                                    server_ref.cfg["data_dir"], renotify_hours=hrs)
+                                server_ref._start_renotify_loop(hrs)
+                                print(f"[SETTINGS] Alert tracker enabled ({hrs}h)")
+                            elif hrs == 0 and server_ref.tracker:
+                                server_ref.tracker = None
+                                print(f"[SETTINGS] Alert tracker disabled")
+
+                    # Log changes
+                    if changes:
+                        server_ref._log_config_change(changes)
+                        print(f"[SETTINGS] {len(changes)} setting(s) updated: "
+                              + ", ".join(f"{c['setting']}: {c['old_value']} -> {c['new_value']}" for c in changes))
+
+                    self._json_response(200, {"updated": changes})
+
                 else:
                     # Normal webhook from Vector
                     self.send_response(200)
@@ -375,6 +470,20 @@ class WebhookServer:
                                     entries.append(json.loads(line))
                     self._json_response(200, entries)
 
+                elif path == "/settings":
+                    self._json_response(200, server_ref._get_settings())
+
+                elif path == "/config-changes":
+                    log_file = server_ref.data_dir / "logs" / "config_changes.json"
+                    entries = []
+                    if log_file.exists():
+                        with open(log_file) as f:
+                            for line in f:
+                                line = line.strip()
+                                if line:
+                                    entries.append(json.loads(line))
+                    self._json_response(200, entries)
+
                 elif path == "/baselines":
                     baseline_dir = server_ref.data_dir / "baselines"
                     baselines = {}
@@ -404,8 +513,8 @@ class WebhookServer:
         print(f"[pansyslog] Webhook server starting on port {port}")
         print(f"[pansyslog] Panorama: {pan_host}")
         print(f"[pansyslog] Device groups: {dg_label}")
-        print(f"[pansyslog] Endpoints: POST /(webhook) /check /acknowledge /baseline/reset /reauth | "
-              f"GET /health /active-alerts /check-history /alerts /baselines")
+        print(f"[pansyslog] Endpoints: POST /(webhook) /check /acknowledge /baseline/reset /reauth /settings | "
+              f"GET /health /active-alerts /check-history /alerts /baselines /settings /config-changes")
         if self.cfg["email"]["enabled"]:
             print(f"[pansyslog] Alerts will be sent to {self.cfg['email']['to']}")
         else:

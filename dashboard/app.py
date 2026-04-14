@@ -118,6 +118,18 @@ async def troubleshooting_page(request: Request):
     return _render(request, "troubleshooting.html", {"health": health, "page": "troubleshooting"})
 
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    settings = await api_get("/settings")
+    changes = await api_get("/config-changes")
+    if not isinstance(changes, list):
+        changes = []
+    changes.reverse()  # newest first
+    return _render(request, "settings.html", {
+        "settings": settings, "changes": changes, "page": "settings",
+    })
+
+
 # --- API actions (proxied to pansyslog) ---
 
 @app.post("/api/check")
@@ -140,6 +152,12 @@ async def reset_baseline(request: Request):
 @app.post("/api/reauth")
 async def reauth():
     return await api_post("/reauth")
+
+
+@app.post("/api/settings")
+async def update_settings(request: Request):
+    body = await request.json()
+    return await api_post("/settings", body)
 
 
 # --- Data API (direct read for CSV export) ---

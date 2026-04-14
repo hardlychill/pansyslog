@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p style="color: var(--text-dim); margin-bottom: 1.5rem;">
+    Runtime-configurable settings. Changes take effect immediately and are logged.
+    Panorama credentials, alert zones, and SMTP server settings require editing config.yaml and restarting.
+</p>
+
+{% if settings is mapping and settings %}
+<div class="card" style="margin-bottom: 2rem;">
+    <form id="settings-form" onsubmit="return saveSettings(event)">
+        <table style="background: transparent;">
+            <tr>
+                <td style="border: none; color: var(--text-dim); width: 220px; padding: 0.8rem 0;">Firewall Alert Email</td>
+                <td style="border: none; padding: 0.8rem 0;">
+                    <input type="text" name="email_to" value="{{ settings.get('email_to', '') }}"
+                           style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 350px; font-size: 0.9rem;">
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">On-call receives firewall rule change alerts here</div>
+                </td>
+            </tr>
+            <tr>
+                <td style="border: none; color: var(--text-dim); padding: 0.8rem 0;">System Alert Email</td>
+                <td style="border: none; padding: 0.8rem 0;">
+                    <input type="text" name="email_system_to" value="{{ settings.get('email_system_to', '') }}"
+                           style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 350px; font-size: 0.9rem;">
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Baseline anomalies and system alerts. Leave empty to disable system emails.</div>
+                </td>
+            </tr>
+            <tr>
+                <td style="border: none; color: var(--text-dim); padding: 0.8rem 0;">Re-notification Interval</td>
+                <td style="border: none; padding: 0.8rem 0;">
+                    <input type="number" name="renotify_hours" value="{{ settings.get('renotify_hours', 0) }}" min="0"
+                           style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 100px; font-size: 0.9rem;">
+                    <span style="color: var(--text-dim); margin-left: 0.5rem;">hours (0 = disabled)</span>
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Re-email unacknowledged alerts at this interval. Set 0 to disable tracking entirely.</div>
+                </td>
+            </tr>
+            <tr>
+                <td style="border: none; color: var(--text-dim); padding: 0.8rem 0;">Debounce Window</td>
+                <td style="border: none; padding: 0.8rem 0;">
+                    <input type="number" name="debounce_seconds" value="{{ settings.get('debounce_seconds', 30) }}" min="5" max="300"
+                           style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 100px; font-size: 0.9rem;">
+                    <span style="color: var(--text-dim); margin-left: 0.5rem;">seconds</span>
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Cooldown between check cycles after syslog events.</div>
+                </td>
+            </tr>
+            <tr>
+                <td style="border: none; color: var(--text-dim); padding: 0.8rem 0;">Parallel Workers</td>
+                <td style="border: none; padding: 0.8rem 0;">
+                    <input type="number" name="max_workers" value="{{ settings.get('max_workers', 10) }}" min="1" max="50"
+                           style="background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.8rem; width: 100px; font-size: 0.9rem;">
+                    <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.3rem;">Number of device groups checked concurrently.</div>
+                </td>
+            </tr>
+        </table>
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <span id="save-status" style="margin-left: 1rem; font-size: 0.85rem; color: var(--text-dim);"></span>
+        </div>
+    </form>
+</div>
+{% else %}
+<div class="empty">Cannot load settings — pansyslog engine may be unreachable.</div>
+{% endif %}
+
+<h1>Change Log</h1>
+<p style="color: var(--text-dim); margin-bottom: 1rem;">All settings changes are recorded.</p>
+
+{% if changes %}
+<table>
+    <tr>
+        <th>Time</th>
+        <th>Setting</th>
+        <th>Old Value</th>
+        <th>New Value</th>
+    </tr>
+    {% for entry in changes %}
+        {% for change in entry.changes %}
+        <tr>
+            <td style="white-space: nowrap;">{{ entry.timestamp[:19] }}</td>
+            <td class="mono">{{ change.setting }}</td>
+            <td>{{ change.old_value }}</td>
+            <td>{{ change.new_value }}</td>
+        </tr>
+        {% endfor %}
+    {% endfor %}
+</table>
+{% else %}
+<div class="empty">No settings changes recorded yet.</div>
+{% endif %}
+
+<script>
+async function saveSettings(e) {
+    e.preventDefault();
+    const form = document.getElementById('settings-form');
+    const data = {};
+    const inputs = form.querySelectorAll('input');
+    inputs.forEach(input => {
+        if (input.type === 'number') {
+            data[input.name] = parseInt(input.value);
+        } else {
+            data[input.name] = input.value;
+        }
+    });
+
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saving...';
+    status.style.color = 'var(--text-dim)';
+
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data),
+        });
+        const result = await resp.json();
+        if (result.updated && result.updated.length > 0) {
+            status.textContent = `Saved ${result.updated.length} change(s)`;
+            status.style.color = 'var(--green)';
+            setTimeout(() => location.reload(), 1500);
+        } else if (result.error) {
+            status.textContent = result.error;
+            status.style.color = 'var(--red)';
+        } else {
+            status.textContent = 'No changes';
+            status.style.color = 'var(--text-dim)';
+        }
+    } catch (err) {
+        status.textContent = 'Failed to save';
+        status.style.color = 'var(--red)';
+    }
+}
+</script>
+{% endblock %}
